@@ -27,7 +27,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: AlienXAXS/StarRupture-Game-SDK
-          token: ${{ secrets.GAME_SDK_PAT }}
           path: game-sdk
 
       - name: Add MSBuild to PATH
