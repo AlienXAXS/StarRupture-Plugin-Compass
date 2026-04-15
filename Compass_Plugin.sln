@@ -1,0 +1,28 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Compass_Plugin", "src\Compass_Plugin.vcxproj", "{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Client Debug|x64 = Client Debug|x64
+		Client Release|x64 = Client Release|x64
+		Local SDK Client Debug|x64 = Local SDK Client Debug|x64
+		Local SDK Client Release|x64 = Local SDK Client Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Client Debug|x64.ActiveCfg = Client Debug|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Client Debug|x64.Build.0 = Client Debug|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Client Release|x64.ActiveCfg = Client Release|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Client Release|x64.Build.0 = Client Release|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Local SDK Client Debug|x64.ActiveCfg = Local SDK Client Debug|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Local SDK Client Debug|x64.Build.0 = Local SDK Client Debug|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Local SDK Client Release|x64.ActiveCfg = Local SDK Client Release|x64
+		{3D4E5F60-7182-4A3B-9C5D-E6F708192A3B}.Local SDK Client Release|x64.Build.0 = Local SDK Client Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
