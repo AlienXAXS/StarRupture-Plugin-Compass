@@ -676,6 +676,33 @@ namespace Compass
 	// Prevents crashes on save reload when the new UWorld reuses the same address.
 	// ---------------------------------------------------------------------------
 
+	// ---------------------------------------------------------------------------
+	// OnExperienceLoadComplete -- fires when the gameplay experience finishes
+	// loading (game framework fully ready).  Safe game-thread context for calling
+	// StaticLoadObject without touching the streaming system mid-render.
+	// ---------------------------------------------------------------------------
+	static void OnExperienceLoadComplete()
+	{
+		LOG_INFO("[Compass] OnExperienceLoadComplete: loading textures");
+		SDK::UWorld* world = SDK::UWorld::GetWorld();
+		LoadAllTextures(world);
+	}
+
+	// ---------------------------------------------------------------------------
+	// OnAnyWorldBeginPlay -- secondary trigger so textures are re-loaded if the
+	// experience callback was missed (e.g. plugin loaded mid-session) or after a
+	// seamless travel that fires BeginPlay without re-firing ExperienceLoadComplete.
+	// ---------------------------------------------------------------------------
+	static void OnAnyWorldBeginPlay(SDK::UWorld* world, const char* worldName)
+	{
+		if (!world) return;
+		// Only care about the main game world, not menus / loading screens.
+		if (std::string(worldName) != "ChimeraMain") return;
+
+		LOG_INFO("[Compass] OnAnyWorldBeginPlay: '%s' -- loading textures", worldName);
+		LoadAllTextures(world);
+	}
+
 	static void OnBeforeWorldEndPlay(SDK::UWorld* /*world*/, const char* worldName)
 	{
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: '%s' — clearing all caches and stale pointers", worldName);
@@ -692,8 +719,10 @@ namespace Compass
 		g_mapManuSubsystem = nullptr;
 		g_mapManuWorld = nullptr;
 
-		// Reset texture world anchor so EnsureTextures re-anchors in the new world.
-		s_lastPinnedWorld = nullptr;
+		// Clear texture slots -- they will be reloaded fresh in OnExperienceLoadComplete
+		// or OnAnyWorldBeginPlay for the new world.  Nulling them here prevents DrawCompass
+		// from drawing with stale pointers during the world teardown/transition gap.
+		ClearTextures();
 
 		// Reset world name tracking.
 		s_lastWorldName.clear();
@@ -798,6 +827,13 @@ namespace Compass
 		// The modloader owns the AHUD::PostRender hook and fires callbacks after calling the original.
 		hooks->HUD->RegisterOnPostRender(OnHUDPostRender);
 
+		// Load textures when the gameplay experience is fully ready -- this is the
+		// safest game-thread context for StaticLoadObject (not render-adjacent).
+		hooks->World->RegisterOnExperienceLoadComplete(OnExperienceLoadComplete);
+
+		// Secondary trigger: catches seamless travel and plugin-loaded-mid-session cases.
+		hooks->World->RegisterOnAnyWorldBeginPlay(OnAnyWorldBeginPlay);
+
 		// Register world end play callback to clear stale state before world teardown.
 		hooks->World->RegisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
 
@@ -817,8 +853,10 @@ namespace Compass
 
 		if (g_hooks && g_hooks->World)
 		{
+			g_hooks->World->UnregisterOnExperienceLoadComplete(OnExperienceLoadComplete);
+			g_hooks->World->UnregisterOnAnyWorldBeginPlay(OnAnyWorldBeginPlay);
 			g_hooks->World->UnregisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
-			LOG_INFO("[Compass] OnBeforeWorldEndPlay callback unregistered");
+			LOG_INFO("[Compass] World callbacks unregistered");
 		}
 
 		g_hooks = nullptr;

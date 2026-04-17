@@ -224,13 +224,112 @@ namespace Compass
 		          static_cast<void*>(obj), static_cast<void*>(world), world->ExtraReferencedObjects.Num());
 	}
 
+	// ---------------------------------------------------------------------------
+	// Asset path table -- shared between LoadAllTextures and EnsureTextures.
+	// ---------------------------------------------------------------------------
+	struct TexEntry
+	{
+		SDK::UTexture*& slot;
+		const wchar_t* fullPath;
+	};
+
+	// ---------------------------------------------------------------------------
+	// LoadAllTextures -- loads every texture slot via StaticLoadObject.
+	//
+	// Must be called from a safe game-thread context (e.g. OnExperienceLoadComplete
+	// or OnAnyWorldBeginPlay), NOT from inside a PostRender callback.  Calling
+	// StaticLoadObject from a render-adjacent context can touch the streaming system
+	// while it is in an undefined state and produce corrupted GPU resources (the
+	// "random coloured squares" symptom).
+	//
+	// After loading, each texture is pinned to the GC root set and anchored in
+	// world->ExtraReferencedObjects so the GC traversal keeps it alive.
+	// ---------------------------------------------------------------------------
+	static void LoadAllTextures(SDK::UWorld* world)
+	{
+		if (!g_StaticLoadObject)
+		{
+			LOG_WARN("[Compass] LoadAllTextures: StaticLoadObject not registered -- skipping");
+			return;
+		}
+
+		TexEntry entries[] = {
+			{s_tex.player,       L"/Game/Chimera/UI/Map/Markers/T_UI_player_mapIcon.T_UI_player_mapIcon"},
+			{s_tex.baseCore,     L"/Game/Chimera/UI/Map/Markers/T_UI_baseCore_mapIcon.T_UI_baseCore_mapIcon"},
+			{s_tex.body,         L"/Game/Chimera/UI/Map/Markers/T_UI_deadBody_mapIcon.T_UI_deadBody_mapIcon"},
+			{s_tex.drone,        L"/Game/Chimera/UI/Map/Markers/T_UI_drone_mapIcon.T_UI_drone_mapIcon"},
+			{s_tex.antena,       L"/Game/Chimera/UI/Map/Markers/T_UI_antenna_mapIcon.T_UI_antenna_mapIcon"},
+			{s_tex.abandonedBase,L"/Game/Chimera/UI/Map/Markers/T_UI_abandonedBase_mapIcon.T_UI_abandonedBase_mapIcon"},
+			{s_tex.cave,         L"/Game/Chimera/UI/Map/Markers/T_UI_cave_mapIcon.T_UI_cave_mapIcon"},
+			{s_tex.obelisk,      L"/Game/Chimera/UI/Map/Markers/T_UI_obelisk_mapIcon.T_UI_obelisk_mapIcon"},
+			{s_tex.customPin,    L"/Game/Chimera/UI/Map/Markers/T_UI_marker_mapIcon.T_UI_marker_mapIcon"},
+		};
+
+		int loaded = 0;
+		for (auto& e : entries)
+		{
+			// Skip slots that are already valid -- no need to reload a live texture.
+			if (e.slot && IsValidTexture(e.slot))
+				continue;
+
+			if (e.slot)
+				LOG_WARN("[Compass] LoadAllTextures: slot %p was invalid -- reloading", static_cast<void*>(e.slot));
+
+			e.slot = nullptr;
+			auto* obj = g_StaticLoadObject(nullptr, nullptr, e.fullPath, nullptr, 0, nullptr, true, nullptr);
+			if (obj)
+			{
+				e.slot = static_cast<SDK::UTexture*>(obj);
+				PinToRoot(obj);
+				AnchorInWorld(world, obj);
+				++loaded;
+			}
+			else
+			{
+				LOG_WARN("[Compass] LoadAllTextures: StaticLoadObject returned null for %ls", e.fullPath);
+			}
+		}
+
+		s_lastPinnedWorld = world;
+
+		LOG_INFO(
+			"[Compass] LoadAllTextures: %d/9 loaded -- player=%p core=%p body=%p drone=%p antenna=%p abandonedBase=%p cave=%p obelisk=%p customPin=%p",
+			loaded,
+			static_cast<void*>(s_tex.player), static_cast<void*>(s_tex.baseCore), static_cast<void*>(s_tex.body),
+			static_cast<void*>(s_tex.drone),  static_cast<void*>(s_tex.antena),   static_cast<void*>(s_tex.abandonedBase),
+			static_cast<void*>(s_tex.cave),   static_cast<void*>(s_tex.obelisk),  static_cast<void*>(s_tex.customPin));
+	}
+
+	// ---------------------------------------------------------------------------
+	// ClearTextures -- nulls all slots so they are reloaded on the next
+	// LoadAllTextures call.  Call from OnBeforeWorldEndPlay.
+	// ---------------------------------------------------------------------------
+	static void ClearTextures()
+	{
+		s_tex = {};
+		s_lastPinnedWorld = nullptr;
+		LOG_INFO("[Compass] ClearTextures: all texture slots cleared");
+	}
+
+	// ---------------------------------------------------------------------------
+	// EnsureTextures -- called per-frame from DrawCompass (render-adjacent context).
+	//
+	// Does NOT call StaticLoadObject.  Only:
+	//   1. Re-anchors already-loaded textures when the world pointer changes.
+	//   2. Reports whether each slot is currently valid (for DrawEntityIcon fallback).
+	//
+	// If a slot is invalid here it means the GC or streaming system evicted the
+	// texture between the last LoadAllTextures call and this frame.  The slot will
+	// be reloaded on the next OnExperienceLoadComplete / OnAnyWorldBeginPlay fire.
+	// Until then, DrawCompass falls back to text for that slot.
+	// ---------------------------------------------------------------------------
 	static void EnsureTextures(SDK::UWorld* world)
 	{
-		// Without StaticLoadObject there is no way to load textures -- use text fallback.
-		if (!g_StaticLoadObject) return;
+		if (!world) return;
 
-		// On world change: re-anchor all loaded textures in the new world's reference list.
-		if (world && world != s_lastPinnedWorld)
+		// Re-anchor all loaded textures in the new world's ExtraReferencedObjects
+		// whenever the world pointer changes (e.g. seamless travel).
+		if (world != s_lastPinnedWorld)
 		{
 			s_lastPinnedWorld = world;
 			SDK::UObject* slots[] = {
@@ -240,84 +339,12 @@ namespace Compass
 			};
 			int reanchored = 0;
 			for (auto* obj : slots)
-				if (obj)
+				if (obj && IsValidTexture(static_cast<SDK::UTexture*>(obj)))
 				{
 					AnchorInWorld(world, obj);
 					++reanchored;
 				}
-			LOG_DEBUG("[Compass] World changed -- re-anchored %d textures in ExtraReferencedObjects", reanchored);
+			LOG_DEBUG("[Compass] EnsureTextures: world changed -- re-anchored %d textures", reanchored);
 		}
-
-		struct TexEntry
-		{
-			SDK::UTexture*& slot;
-			const wchar_t* fullPath;
-		};
-		TexEntry entries[] = {
-			{s_tex.player, L"/Game/Chimera/UI/Map/Markers/T_UI_player_mapIcon.T_UI_player_mapIcon"},
-			{s_tex.baseCore, L"/Game/Chimera/UI/Map/Markers/T_UI_baseCore_mapIcon.T_UI_baseCore_mapIcon"},
-			{s_tex.body, L"/Game/Chimera/UI/Map/Markers/T_UI_deadBody_mapIcon.T_UI_deadBody_mapIcon"},
-			{s_tex.drone, L"/Game/Chimera/UI/Map/Markers/T_UI_drone_mapIcon.T_UI_drone_mapIcon"},
-			{s_tex.antena, L"/Game/Chimera/UI/Map/Markers/T_UI_antenna_mapIcon.T_UI_antenna_mapIcon"},
-			{
-				s_tex.abandonedBase,
-				L"/Game/Chimera/UI/Map/Markers/T_UI_abandonedBase_mapIcon.T_UI_abandonedBase_mapIcon"
-			},
-			{s_tex.cave, L"/Game/Chimera/UI/Map/Markers/T_UI_cave_mapIcon.T_UI_cave_mapIcon"},
-			{s_tex.obelisk, L"/Game/Chimera/UI/Map/Markers/T_UI_obelisk_mapIcon.T_UI_obelisk_mapIcon"},
-			{s_tex.customPin, L"/Game/Chimera/UI/Map/Markers/T_UI_marker_mapIcon.T_UI_marker_mapIcon"},
-		};
-
-		// Per-frame pass: if a previously-loaded slot is now invalid, reload it immediately
-		// so there's no visible gap this frame. StaticLoadObject is cheap when the asset
-		// is still resident in the package cache.
-		bool anyNull = false;
-		for (auto& e : entries)
-		{
-			if (!e.slot)
-			{
-				anyNull = true;
-				continue;
-			}
-			if (IsValidTexture(e.slot)) continue;
-
-			LOG_WARN("[Compass] Texture %p invalidated -- reloading immediately", static_cast<void*>(e.slot));
-			e.slot = nullptr;
-			auto* obj = g_StaticLoadObject(nullptr, nullptr, e.fullPath, nullptr, 0, nullptr, true, nullptr);
-			if (obj)
-			{
-				e.slot = static_cast<SDK::UTexture*>(obj);
-				PinToRoot(obj);
-				AnchorInWorld(world, obj);
-			}
-			if (!e.slot) anyNull = true;
-		}
-
-		// Throttled pass: initial load of slots that have never been loaded (or whose
-		// immediate reload above failed). ~1 attempt per second at 60 fps.
-		if (!anyNull) return;
-
-		static int s_retryTick = 60; // start at 60 so first attempt fires immediately
-		if (++s_retryTick < 60) return;
-		s_retryTick = 0;
-
-		for (auto& e : entries)
-		{
-			if (e.slot) continue;
-			auto* obj = g_StaticLoadObject(nullptr, nullptr, e.fullPath, nullptr, 0, nullptr, true, nullptr);
-			if (obj)
-			{
-				e.slot = static_cast<SDK::UTexture*>(obj);
-				PinToRoot(obj);
-				AnchorInWorld(world, obj);
-			}
-		}
-
-		LOG_DEBUG(
-			"[Compass] Texture resolve: player=%p core=%p body=%p drone=%p antenna=%p abandonedBase=%p cave=%p obelisk=%p customPin=%p",
-			static_cast<void*>(s_tex.player), static_cast<void*>(s_tex.baseCore), static_cast<void*>(s_tex.body),
-			static_cast<void*>(s_tex.drone),
-			static_cast<void*>(s_tex.antena), static_cast<void*>(s_tex.abandonedBase),
-			static_cast<void*>(s_tex.cave), static_cast<void*>(s_tex.obelisk), static_cast<void*>(s_tex.customPin));
 	}
 } // namespace Compass
