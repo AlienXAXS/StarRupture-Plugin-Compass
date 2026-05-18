@@ -8,7 +8,7 @@ static IPluginSelf* g_self = nullptr;
 IPluginSelf* GetSelf() { return g_self; }
 
 #ifndef MODLOADER_BUILD_TAG
-#define MODLOADER_BUILD_TAG "0.2"
+#define MODLOADER_BUILD_TAG "dev"
 #endif
 
 static PluginInfo s_pluginInfo = {
