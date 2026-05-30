@@ -16,7 +16,8 @@ static PluginInfo s_pluginInfo = {
 	MODLOADER_BUILD_TAG,
 	"AlienX",
 	"Client-side HUD compass overlay",
-	PLUGIN_INTERFACE_VERSION
+	PLUGIN_INTERFACE_VERSION,
+	PLUGIN_TARGET_CLIENT
 };
 
 extern "C" {
