@@ -214,7 +214,7 @@ jobs:
         with:
           api_key: ${{ secrets.NEXUS_APIKEY }}
           file_group_id: ${{ secrets.NEXUS_CLIENT_GROUP_ID }}
-          filename: ${{ github.workspace }}\Compass-Client-${{ steps.tag.outputs.TAG }}.zip
+          filename: ${{ github.workspace }}\Compass_Plugin-Client-${{ steps.tag.outputs.TAG }}.zip
           archive_existing_file: true
           allow_mod_manager_download: false
           display_name: "Compass Client ${{ steps.tag.outputs.TAG }}"
