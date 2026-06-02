@@ -8,17 +8,29 @@
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
 #include <vector>
 
 namespace Compass
 {
 	// ---------------------------------------------------------------------------
-	// HUD hook state
+	// Hook state
 	// ---------------------------------------------------------------------------
 
-	// Hooks interface kept for Remove() to unregister the callback.
 	static IPluginHooks* g_hooks = nullptr;
+	static IPluginSelf*  g_self  = nullptr;
+
+	// ---------------------------------------------------------------------------
+	// Viewport draw hook (optional AOB path)
+	// ---------------------------------------------------------------------------
+
+	static constexpr const char* VIEWPORT_DRAW_PATTERN =
+		"48 89 5C 24 ?? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
+		"48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 ?? ?? ?? ?? "
+		"45 33 FF 48 89 55";
+
+	using ViewportDraw_t = void(__fastcall*)(void*, void*, void*);
+	static ViewportDraw_t g_originalViewportDraw = nullptr;
+	static HookHandle     g_viewportDrawHook     = nullptr;
 
 	// ---------------------------------------------------------------------------
 	// Cardinal direction table
@@ -93,11 +105,11 @@ namespace Compass
 	}
 
 	// ---------------------------------------------------------------------------
-	// Throttled entity cache
+	// Throttled entity cache (time-based, driven by OnTick not frame count)
 	// ---------------------------------------------------------------------------
 
-	static int s_scanTick = 0;
-	static int s_playerScanTick = 0;
+	static float s_scanAccum = 0.0f;
+	static float s_playerScanAccum = 0.0f;
 
 	// ---------------------------------------------------------------------------
 	// GatherPlayersData -- direct call to UCrMapManuSubsystem::GatherPlayersData
@@ -153,7 +165,7 @@ namespace Compass
 	static std::vector<Layout::EnemyEntry> s_enemies;
 	static std::vector<Layout::PlayerMarkerEntry> s_playerMarkers;
 	static std::vector<Layout::CustomPinEntry> s_customPins;
-	static std::string s_lastWorldName; // tracks world changes for log-on-change
+	static bool s_isChimeraMain = false; // set by OnAnyWorldBeginPlay, cleared by OnBeforeWorldEndPlay
 
 	static void RefreshEntities(SDK::UWorld* world)
 	{
@@ -238,64 +250,26 @@ namespace Compass
 	}
 
 	// ---------------------------------------------------------------------------
-	// Compass drawing
+	// OnTick -- game-thread tick; drives all entity scanning so DrawCompass is
+	// purely read + draw with no world traversal on the render path.
 	// ---------------------------------------------------------------------------
 
-	static void DrawCompass(SDK::AHUD* hud, SDK::UCanvas* canvas, SDK::UWorld* world)
+	static void OnTick(float deltaSeconds)
 	{
-		// Refresh cached config ~every 2 s (120 frames). Far cheaper than reading
-		// the INI file on every frame; still fast enough to feel live when editing.
-		if (++s_cfgTick >= 120)
+		if (!s_isChimeraMain) return;
+
+		SDK::UWorld* world = nullptr;
+		try { world = SDK::UWorld::GetWorld(); }
+		catch (...) { return; }
+		if (!world) return;
+
+		// Player scan (fast interval).
+		s_playerScanAccum += deltaSeconds;
+		const float playerScanInterval = s_cfg.playerScanInterval / 60.0f;
+		if (s_playerScanAccum >= playerScanInterval)
 		{
-			s_cfgTick = 0;
-			RefreshConfig();
-		}
+			s_playerScanAccum = 0.0f;
 
-		const bool textOnly = s_cfg.textOnly;
-		if (!textOnly)
-			EnsureTextures(world);
-
-		SDK::APlayerController* pc = hud->GetOwningPlayerController();
-		if (!pc)
-			return;
-
-		SDK::APawn* localPawn = pc->K2_GetPawn();
-		SDK::FVector playerLoc = localPawn ? localPawn->K2_GetActorLocation() : SDK::FVector{};
-
-		SDK::FRotator controlRot = pc->GetControlRotation();
-		// rawYaw: UE-space (0 = East). Used for entity bearing math.
-		// yaw:    compass-convention (0 = North). Used for cardinal placement.
-		const float rawYaw = static_cast<float>(controlRot.Yaw);
-		const float yaw = rawYaw + 90.0f;
-
-		const float scale = s_cfg.scale;
-		const float posY = s_cfg.posY;
-		const float halfWidth = canvas->SizeX * 0.5f * s_cfg.widthFraction * scale;
-		const float centerX = canvas->SizeX * 0.5f;
-		const float left = centerX - halfWidth;
-		const float right = centerX + halfWidth;
-
-		// One-time config dump to help diagnose sizing/position issues
-		static bool s_firstDraw = true;
-		if (s_firstDraw)
-		{
-			s_firstDraw = false;
-			LOG_INFO("[Compass] First draw -- scale=%.2f posY=%.1f widthFraction=%.2f scanInterval=%d canvas=%dx%d",
-			         scale, posY, s_cfg.widthFraction, s_cfg.entityScanInterval,
-			         static_cast<int>(canvas->SizeX), static_cast<int>(canvas->SizeY));
-		}
-
-		SDK::UFont* labelFont = SDK::UEngine::GetEngine() ? SDK::UEngine::GetEngine()->LargeFont : nullptr;
-		SDK::UFont* entityFont = labelFont; // same font as cardinals for bigger entity text
-
-		// --- Throttled player scan (fast) ---
-		if (++s_playerScanTick >= s_cfg.playerScanInterval)
-		{
-			s_playerScanTick = 0;
-
-			// Force an immediate refresh of PlayersMarkerDataContainer before reading it.
-			// Without this, the container only updates when the game processes the flag
-			// at localPC+3816, which happens at the slow entityScanInterval rate.
 			if (g_gatherPlayersDataFn)
 			{
 				if (world != g_mapManuWorld)
@@ -324,12 +298,58 @@ namespace Compass
 			}
 		}
 
-		// --- Throttled full entity scan (slow) ---
-		if (++s_scanTick >= s_cfg.entityScanInterval)
+		// Full entity scan (slow interval).
+		s_scanAccum += deltaSeconds;
+		const float scanInterval = s_cfg.entityScanInterval / 60.0f;
+		if (s_scanAccum >= scanInterval)
 		{
-			s_scanTick = 0;
+			s_scanAccum = 0.0f;
 			RefreshEntities(world);
 		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Compass drawing
+	// ---------------------------------------------------------------------------
+
+	static void DrawCompass(SDK::AHUD* hud, SDK::UCanvas* canvas, SDK::UWorld* world)
+	{
+		const bool textOnly = s_cfg.textOnly;
+		if (!textOnly)
+			EnsureTextures(world);
+
+		SDK::APlayerController* pc = hud->GetOwningPlayerController();
+		if (!pc)
+			return;
+		
+		SDK::APawn* localPawn = pc->K2_GetPawn();
+		SDK::FVector playerLoc = localPawn ? localPawn->K2_GetActorLocation() : SDK::FVector{};
+
+		SDK::FRotator controlRot = pc->GetControlRotation();
+		// rawYaw: UE-space (0 = East). Used for entity bearing math.
+		// yaw:    compass-convention (0 = North). Used for cardinal placement.
+		const float rawYaw = static_cast<float>(controlRot.Yaw);
+		const float yaw = rawYaw + 90.0f;
+
+		const float scale = s_cfg.scale;
+		const float posY = s_cfg.posY;
+		const float halfWidth = canvas->SizeX * 0.5f * s_cfg.widthFraction * scale;
+		const float centerX = canvas->SizeX * 0.5f;
+		const float left = centerX - halfWidth;
+		const float right = centerX + halfWidth;
+
+		// One-time config dump to help diagnose sizing/position issues
+		static bool s_firstDraw = true;
+		if (s_firstDraw)
+		{
+			s_firstDraw = false;
+			LOG_INFO("[Compass] First draw -- scale=%.2f posY=%.1f widthFraction=%.2f scanInterval=%d canvas=%dx%d",
+			         scale, posY, s_cfg.widthFraction, s_cfg.entityScanInterval,
+			         static_cast<int>(canvas->SizeX), static_cast<int>(canvas->SizeY));
+		}
+
+		SDK::UFont* labelFont = SDK::UEngine::GetEngine() ? SDK::UEngine::GetEngine()->LargeFont : nullptr;
+		SDK::UFont* entityFont = labelFont; // same font as cardinals for bigger entity text
 
 		// --- Helper: world position -> compass screenX ---
 		auto ToScreenX = [&](const SDK::FVector& pos) -> float
@@ -529,15 +549,40 @@ namespace Compass
 		// Unified draw queue -- all visible entities sorted by distance descending
 		// so that the closest entity is always drawn last (rendered on top).
 		// ---------------------------------------------------------------------------
+		enum class DrawKind : uint8_t { Icon, IconWithLabel };
 		struct DrawCall
 		{
 			float distSq;
-			std::function<void()> fn;
+			float screenX;
+			float alpha;
+			SDK::UTexture* tex;
+			SDK::FLinearColor colour;
+			wchar_t label[64];
+			DrawKind kind;
 		};
 		std::vector<DrawCall> drawQueue;
 		drawQueue.reserve(
 			s_playerMarkers.size() + s_cores.size() +
 			s_markers.size() + s_foundables.size() + s_customPins.size());
+
+		auto PushIcon = [&](float distSq, float sx, SDK::UTexture* tex,
+		                    const wchar_t* sym, SDK::FLinearColor col, float alpha)
+		{
+			DrawCall dc{};
+			dc.distSq = distSq; dc.screenX = sx; dc.alpha = alpha;
+			dc.tex = tex; dc.colour = col; dc.kind = DrawKind::Icon;
+			wcsncpy_s(dc.label, sym, _TRUNCATE);
+			drawQueue.push_back(dc);
+		};
+		auto PushLabel = [&](float distSq, float sx, SDK::UTexture* tex,
+		                     const wchar_t* lbl, SDK::FLinearColor col, float alpha)
+		{
+			DrawCall dc{};
+			dc.distSq = distSq; dc.screenX = sx; dc.alpha = alpha;
+			dc.tex = tex; dc.colour = col; dc.kind = DrawKind::IconWithLabel;
+			wcsncpy_s(dc.label, lbl, _TRUNCATE);
+			drawQueue.push_back(dc);
+		};
 
 		// Players -- sourced from PlayersMarkerDataContainer (map subsystem), not actor scan.
 		// Covers all online players regardless of streaming range.
@@ -549,11 +594,7 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), cfgPlayers.distance);
 				if (alpha <= 0.0f) continue;
-				const float sx = ToScreenX(p.location);
-				const std::wstring wn = p.playerName;
-				drawQueue.push_back({
-					distSq, [=] { DrawEntityIconWithLabel(sx, s_tex.player, wn.c_str(), colPlayer, alpha); }
-				});
+				PushLabel(distSq, ToScreenX(p.location), s_tex.player, p.playerName.c_str(), colPlayer, alpha);
 			}
 		}
 		if (cfgCores.enabled)
@@ -564,11 +605,7 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), cfgCores.distance);
 				if (alpha <= 0.0f) continue;
-				const float sx = ToScreenX(c.location);
-				const std::wstring wn = c.name;
-				drawQueue.push_back({
-					distSq, [=] { DrawEntityIconWithLabel(sx, s_tex.baseCore, wn.c_str(), colCore, alpha); }
-				});
+				PushLabel(distSq, ToScreenX(c.location), s_tex.baseCore, c.name.c_str(), colCore, alpha);
 			}
 		}
 		// ForgottenEngine and OrbitalLander are filtered out in ScanMarkers.
@@ -581,10 +618,7 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), PoiDistance(m.type));
 				if (alpha <= 0.0f) continue;
-				const float sx = ToScreenX(m.location);
-				SDK::UTexture* tex = GetPoiTexture(m.type);
-				const wchar_t* sym = PoiSymbol(m.type);
-				drawQueue.push_back({distSq, [=] { DrawEntityIcon(sx, tex, sym, colMarker, alpha); }});
+				PushIcon(distSq, ToScreenX(m.location), GetPoiTexture(m.type), PoiSymbol(m.type), colMarker, alpha);
 			}
 		}
 		if (cfgFoundables.enabled)
@@ -602,11 +636,10 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), maxDist);
 				if (alpha <= 0.0f) continue;
-				const float sx = ToScreenX(f.location);
 				if (isBody)
-					drawQueue.push_back({distSq, [=] { DrawEntityIcon(sx, s_tex.body, L"D", colBody, alpha); }});
+					PushIcon(distSq, ToScreenX(f.location), s_tex.body, L"D", colBody, alpha);
 				else
-					drawQueue.push_back({distSq, [=] { DrawEntityIcon(sx, s_tex.drone, L"Dr", colDrone, alpha); }});
+					PushIcon(distSq, ToScreenX(f.location), s_tex.drone, L"Dr", colDrone, alpha);
 			}
 		}
 		// --- Personal map pins (ACrGameStateBase::PlayerPersonalMarkers) ---
@@ -618,15 +651,12 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), cfgCustomPins.distance);
 				if (alpha <= 0.0f) continue;
-				const float sx = ToScreenX(pin.location);
 				const SDK::FLinearColor col = {
 					pin.color.R, pin.color.G, pin.color.B,
 					pin.color.A > 0.0f ? pin.color.A : 1.0f
 				};
-				const std::wstring label = pin.playerName.empty() ? L"Pin" : pin.playerName;
-				drawQueue.push_back({
-					distSq, [=] { DrawEntityIconWithLabel(sx, s_tex.customPin, label.c_str(), col, alpha); }
-				});
+				const wchar_t* lbl = pin.playerName.empty() ? L"Pin" : pin.playerName.c_str();
+				PushLabel(distSq, ToScreenX(pin.location), s_tex.customPin, lbl, col, alpha);
 			}
 		}
 
@@ -635,7 +665,12 @@ namespace Compass
 		          [](const DrawCall& a, const DrawCall& b) { return a.distSq > b.distSq; });
 
 		for (const auto& dc : drawQueue)
-			dc.fn();
+		{
+			if (dc.kind == DrawKind::IconWithLabel)
+				DrawEntityIconWithLabel(dc.screenX, dc.tex, dc.label, dc.colour, dc.alpha);
+			else
+				DrawEntityIcon(dc.screenX, dc.tex, dc.label, dc.colour, dc.alpha);
+		}
 
 		// --- Enemy dots (drawn on the compass line itself, on top of everything else) ---
 		// Two-pass per dot: outer glow rect then bright core rect.
@@ -696,8 +731,8 @@ namespace Compass
 	static void OnAnyWorldBeginPlay(SDK::UWorld* world, const char* worldName)
 	{
 		if (!world) return;
-		// Only care about the main game world, not menus / loading screens.
-		if (std::string(worldName) != "ChimeraMain") return;
+		s_isChimeraMain = std::string(worldName) == "ChimeraMain";
+		if (!s_isChimeraMain) return;
 
 		LOG_INFO("[Compass] OnAnyWorldBeginPlay: '%s' -- loading textures", worldName);
 		LoadAllTextures(world);
@@ -724,12 +759,12 @@ namespace Compass
 		// from drawing with stale pointers during the world teardown/transition gap.
 		ClearTextures();
 
-		// Reset world name tracking.
-		s_lastWorldName.clear();
+		// Reset world tracking.
+		s_isChimeraMain = false;
 
-		// Reset scan throttle counters so scans fire immediately in the new world.
-		s_scanTick = 0;
-		s_playerScanTick = 0;
+		// Reset scan throttle accumulators so scans fire immediately in the new world.
+		s_scanAccum = 9999.0f;
+		s_playerScanAccum = 9999.0f;
 
 		// Notify layout scanners to force reset their internal statics on next call,
 		// even if the new world reuses the same pointer address as this one.
@@ -738,67 +773,63 @@ namespace Compass
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: cleanup complete");
 	}
 
+	static void OnConfigChanged(const char* category, const char* key, const char* /*newValue*/)
+	{
+		if (strcmp(category, "Compass") == 0)
+		{
+			RefreshConfig();
+		}
+	}
+
 	// ---------------------------------------------------------------------------
-	// AHUD::PostRender callback (registered via hooks->HUD->RegisterOnPostRender)
-	// The modloader calls the original AHUD::PostRender before invoking this, so
-	// the engine HUD is always drawn first.
+	// UGameViewportClient::Draw detour + PostRender draw
 	// ---------------------------------------------------------------------------
 
+	// Draws the compass during AHUD::PostRender while the canvas is live.
+	// This is the correct insertion point for FSR3 Frame Generation: PostRender fires
+	// inside UGameViewportClient::Draw, before FSR3 FG captures the UI layer for
+	// composition onto generated frames. Drawing here means the compass is included in
+	// that UI capture and appears on every display frame (both real and interpolated).
 	static void OnHUDPostRender(void* hudPtr)
 	{
-		SDK::AHUD* self = static_cast<SDK::AHUD*>(hudPtr);
-		std::string worldName;
-		SDK::UWorld* world;
+		if (!CompassConfig::Config::IsEnabled()) return;
+		if (!s_isChimeraMain) return;
 
-		if (!self || !self->Canvas)
-			return;
+		SDK::AHUD* hud = static_cast<SDK::AHUD*>(hudPtr);
+		if (!hud || !hud->Canvas) return;
 
-		if (!CompassConfig::Config::IsEnabled())
-			return;
+		SDK::UWorld* world = nullptr;
+		try { world = SDK::UWorld::GetWorld(); }
+		catch (...) { return; }
+		if (!world) return;
 
-		try
-		{
-			world = SDK::UWorld::GetWorld();
-			if (!world)
-			{
-				LOG_TRACE("[Compass] PostRender: no world");
-				return;
-			}
-		}
-		catch (...)
-		{
-			LOG_ERROR("[Compass] Exception in GetWorld -- skipping compass draw");
-			return;
-		}
+		try { DrawCompass(hud, hud->Canvas, world); }
+		catch (...) { LOG_ERROR("[Compass] Exception in DrawCompass (PostRender) -- suppressed"); }
+	}
 
-		try
-		{
-			worldName = world->GetName();
-			if (worldName != s_lastWorldName)
-			{
-				LOG_INFO("[Compass] World changed: '%s'", worldName.c_str());
-				s_lastWorldName = worldName;
-			}
-		}
-		catch (...)
-		{
-			LOG_ERROR("[Compass] Exception in GetName");
-			return;
-		}
-
-		if (worldName != "ChimeraMain")
-			return;
-
-		try { DrawCompass(self, self->Canvas, world); }
-		catch (...) { LOG_ERROR("[Compass] Exception in DrawCompass -- suppressed to avoid crash loop"); }
+	// The viewport detour is kept so we retain the AOB hook infrastructure, but
+	// all drawing now happens in OnHUDPostRender above. The detour simply calls
+	// through to the original.
+	static void __fastcall ViewportDrawDetour(void* thisPtr, void* inViewport, void* sceneCanvas)
+	{
+		if (g_originalViewportDraw)
+			g_originalViewportDraw(thisPtr, inViewport, sceneCanvas);
 	}
 
 	// ---------------------------------------------------------------------------
 	// Install / Remove
 	// ---------------------------------------------------------------------------
 
-	bool Install(IPluginHooks* hooks)
+	bool Install(IPluginSelf* self)
 	{
+		if (!self)
+		{
+			LOG_ERROR("[Compass] Install called with null self");
+			return false;
+		}
+
+		IPluginHooks* hooks = self->hooks;
+
 		if (!hooks)
 		{
 			LOG_ERROR("[Compass] Install called with null hooks interface");
@@ -810,6 +841,9 @@ namespace Compass
 			LOG_ERROR("[Compass] hooks->HUD is null -- compass requires a client build");
 			return false;
 		}
+
+		g_self  = self;
+		g_hooks = hooks;
 
 		// Resolve GatherPlayersData from the modloader's pre-scanned address cache.
 		uintptr_t gatherAddr = hooks->HUD->GetGatherPlayersDataAddress();
@@ -823,33 +857,73 @@ namespace Compass
 			LOG_WARN("[Compass] GatherPlayersData address not available -- player markers may not update in real time");
 		}
 
-		// Register the per-frame PostRender callback via the modloader HUD interface.
-		// The modloader owns the AHUD::PostRender hook and fires callbacks after calling the original.
+		// AOB-scan and install the UGameViewportClient::Draw detour.
+		uintptr_t addr = self->scanner->FindPatternInMainModule(VIEWPORT_DRAW_PATTERN);
+		if (!addr)
+		{
+			LOG_ERROR("[Compass] UGameViewportClient::Draw pattern not found -- compass will not render");
+			return false;
+		}
+
+		g_viewportDrawHook = hooks->Hooks->Install(addr, (void*)ViewportDrawDetour, (void**)&g_originalViewportDraw);
+		if (!g_viewportDrawHook)
+		{
+			LOG_ERROR("[Compass] Failed to install UGameViewportClient::Draw hook -- compass will not render");
+			g_originalViewportDraw = nullptr;
+			return false;
+		}
+
+		LOG_INFO("[Compass] UGameViewportClient::Draw hook installed at 0x%llX", static_cast<unsigned long long>(addr));
+
+		// PostRender is where we draw the compass -- inside Draw, before FSR3 FG captures the UI layer.
 		hooks->HUD->RegisterOnPostRender(OnHUDPostRender);
 
-		// Load textures when the gameplay experience is fully ready -- this is the
-		// safest game-thread context for StaticLoadObject (not render-adjacent).
+		// Engine tick drives all entity scanning off the render path.
+		hooks->Engine->RegisterOnTick(OnTick);
+
+		// Load textures when the gameplay experience is fully ready.
 		hooks->World->RegisterOnExperienceLoadComplete(OnExperienceLoadComplete);
 
 		// Secondary trigger: catches seamless travel and plugin-loaded-mid-session cases.
 		hooks->World->RegisterOnAnyWorldBeginPlay(OnAnyWorldBeginPlay);
 
-		// Register world end play callback to clear stale state before world teardown.
+		hooks->UI->RegisterOnConfigChanged(OnConfigChanged);
+
+		// Hot-load seed: if we're already in ChimeraMain when the plugin installs,
+		// OnAnyWorldBeginPlay will never fire for this world, so set the flag now.
+		try
+		{
+			SDK::UWorld* currentWorld = SDK::UWorld::GetWorld();
+			if (currentWorld && currentWorld->GetName() == "ChimeraMain")
+			{
+				s_isChimeraMain = true;
+				LoadAllTextures(currentWorld);
+				LOG_INFO("[Compass] Install: already in ChimeraMain -- s_isChimeraMain set");
+			}
+		}
+		catch (...) {}
+
+		// Clear stale state before world teardown.
 		hooks->World->RegisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
 
-		g_hooks = hooks;
-
-		LOG_INFO("[Compass] PostRender callback registered");
 		return true;
 	}
 
 	void Remove(IPluginHooks* hooks)
 	{
-		if (g_hooks && g_hooks->HUD)
+		if (g_viewportDrawHook && hooks && hooks->Hooks)
 		{
-			g_hooks->HUD->UnregisterOnPostRender(OnHUDPostRender);
-			LOG_INFO("[Compass] PostRender callback unregistered");
+			hooks->Hooks->Remove(g_viewportDrawHook);
+			g_viewportDrawHook     = nullptr;
+			g_originalViewportDraw = nullptr;
+			LOG_INFO("[Compass] UGameViewportClient::Draw hook uninstalled");
 		}
+
+		if (g_hooks && g_hooks->HUD)
+			g_hooks->HUD->UnregisterOnPostRender(OnHUDPostRender);
+
+		if (g_hooks && g_hooks->Engine)
+			g_hooks->Engine->UnregisterOnTick(OnTick);
 
 		if (g_hooks && g_hooks->World)
 		{
@@ -859,7 +933,8 @@ namespace Compass
 			LOG_INFO("[Compass] World callbacks unregistered");
 		}
 
-		g_hooks = nullptr;
+		g_hooks        = nullptr;
+		g_self         = nullptr;
 		g_gatherPlayersDataFn = nullptr;
 	}
 }

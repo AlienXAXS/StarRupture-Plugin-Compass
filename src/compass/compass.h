@@ -4,9 +4,9 @@
 
 namespace Compass
 {
-	// Register the AHUD::PostRender callback via the modloader HUD hook interface.
-	// Returns false if the HUD interface is unavailable (server build) or registration fails.
-	bool Install(IPluginHooks* hooks);
+	// Install the UGameViewportClient::Draw AOB hook.
+	// Returns false if the pattern scan fails or the HUD interface is unavailable.
+	bool Install(IPluginSelf* self);
 
 	// Remove the hook and clean up all state.
 	void Remove(IPluginHooks* hooks);

@@ -9,7 +9,7 @@ namespace CompassConfig
 	static const ConfigEntry CONFIG_ENTRIES[] = {
 		// ----- General -----
 		{ "General", "Enabled",                  ConfigValueType::Boolean, "false",    "Enable or disable the compass overlay" },
-		{ "General", "TextOnly",                 ConfigValueType::Boolean, "false",   "Force text-only mode — never draw icon textures (useful for debugging)" },
+		{ "General", "TextOnly",                 ConfigValueType::Boolean, "false",    "Force text-only mode — never draw icon textures (useful for debugging)" },
 
 		// ----- Compass bar -----
 		{ "Compass", "Scale",                    ConfigValueType::Float,   "1.2",              "Compass size multiplier",                                             0.1f,  5.0f  },
@@ -62,7 +62,7 @@ namespace CompassConfig
 	struct EntitySettings
 	{
 		bool  enabled;
-		float distance; // UU; 0 = unlimited
+		float distance;
 	};
 
 	struct MarkerSettings

@@ -53,7 +53,7 @@ extern "C" {
 				LOG_WARN("StaticLoadObject address not available -- map textures require player to open map first");
 		}
 
-		if (!Compass::Install(self->hooks))
+		if (!Compass::Install(self))
 		{
 			LOG_WARN("Compass hook install failed — compass will not render");
 			// Return true so the plugin still loads; compass just won't draw
