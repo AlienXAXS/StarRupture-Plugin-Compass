@@ -906,6 +906,10 @@ namespace Compass
 		// Clear stale state before world teardown.
 		hooks->World->RegisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
 
+		// Populate s_cfg immediately so DrawCompass has valid values before
+		// OnConfigChanged ever fires (it only fires on subsequent changes).
+		RefreshConfig();
+
 		return true;
 	}
 
