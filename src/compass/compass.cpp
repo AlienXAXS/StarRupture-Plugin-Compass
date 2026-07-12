@@ -61,7 +61,7 @@ namespace Compass
 	}
 
 	// ---------------------------------------------------------------------------
-	// Cached draw config -- refreshed every ~2 s to avoid per-frame INI reads.
+	// Cached draw config -- refreshed on OnConfigChanged to avoid per-frame INI reads.
 	// IsEnabled() is the only value kept as a direct read (it's checked once per
 	// frame in the hook and benefits from immediate response to disable).
 	// ---------------------------------------------------------------------------
@@ -84,7 +84,6 @@ namespace Compass
 	};
 
 	static DrawConfig s_cfg = {};
-	static int s_cfgTick = 120; // start at max so first frame refreshes
 
 	static void RefreshConfig()
 	{
@@ -773,12 +772,16 @@ namespace Compass
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: cleanup complete");
 	}
 
-	static void OnConfigChanged(const char* category, const char* key, const char* /*newValue*/)
+	// RefreshConfig() re-reads every category into s_cfg (General.TextOnly, Compass.*,
+	// Players.*, BaseCores.*, Markers.*, Foundables.*, Enemies.*, CustomPins.*), so any
+	// changed item -- regardless of which category it lives in -- needs a refresh.
+	// This runs synchronously on the game thread, same as OnHUDPostRender, so the
+	// updated value is already in s_cfg by the time the next frame is drawn -- no
+	// extra signaling needed for the compass to look live while editing.
+	static void OnConfigChanged(const char* category, const char* key, const char* newValue)
 	{
-		if (strcmp(category, "Compass") == 0)
-		{
-			RefreshConfig();
-		}
+		//LOG_INFO("[Compass] Config changed: %s.%s = %s -- refreshing", category, key, newValue);
+		RefreshConfig();
 	}
 
 	// ---------------------------------------------------------------------------
