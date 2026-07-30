@@ -890,7 +890,7 @@ namespace Compass
 		// Secondary trigger: catches seamless travel and plugin-loaded-mid-session cases.
 		hooks->World->RegisterOnAnyWorldBeginPlay(OnAnyWorldBeginPlay);
 
-		hooks->UI->RegisterOnConfigChanged(OnConfigChanged);
+		hooks->UI->RegisterOnConfigChanged(self, OnConfigChanged);
 
 		// Hot-load seed: if we're already in ChimeraMain when the plugin installs,
 		// OnAnyWorldBeginPlay will never fire for this world, so set the flag now.
