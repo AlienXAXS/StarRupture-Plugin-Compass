@@ -4,8 +4,12 @@
 
 namespace Compass
 {
-	// Install the UGameViewportClient::Draw AOB hook.
-	// Returns false if the pattern scan fails or the HUD interface is unavailable.
+	// Resolve every AOB the compass needs. Callable only from the plugin's
+	// OnPluginLoadHooks export — the loader refuses scans made anywhere else.
+	void ResolvePatterns(IPluginSelf* self, IPluginHookScanner* scanner);
+
+	// Install the UGameViewportClient::Draw hook against the address ResolvePatterns
+	// found. Returns false if it never resolved, or the HUD interface is unavailable.
 	bool Install(IPluginSelf* self);
 
 	// Remove the hook and clean up all state.

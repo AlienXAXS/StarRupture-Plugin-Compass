@@ -32,6 +32,10 @@ namespace Compass
 	static ViewportDraw_t g_originalViewportDraw = nullptr;
 	static HookHandle     g_viewportDrawHook     = nullptr;
 
+	// Filled in by ResolvePatterns during OnPluginLoadHooks; 0 means the pattern
+	// missed on this build and the compass simply will not draw.
+	static uintptr_t      g_viewportDrawAddr     = 0;
+
 	// ---------------------------------------------------------------------------
 	// Cardinal direction table
 	// ---------------------------------------------------------------------------
@@ -823,6 +827,17 @@ namespace Compass
 	// Install / Remove
 	// ---------------------------------------------------------------------------
 
+	void ResolvePatterns(IPluginSelf* self, IPluginHookScanner* scanner)
+	{
+		if (!self || !scanner)
+			return;
+
+		// Optional: a miss leaves the plugin loaded but silent, which is what the
+		// old scan-at-init path did. The loader still lists it for the user.
+		g_viewportDrawAddr = scanner->ResolveOptional(
+			self, "UGameViewportClient::Draw", VIEWPORT_DRAW_PATTERN);
+	}
+
 	bool Install(IPluginSelf* self)
 	{
 		if (!self)
@@ -860,11 +875,12 @@ namespace Compass
 			LOG_WARN("[Compass] GatherPlayersData address not available -- player markers may not update in real time");
 		}
 
-		// AOB-scan and install the UGameViewportClient::Draw detour.
-		uintptr_t addr = self->scanner->FindPatternInMainModule(VIEWPORT_DRAW_PATTERN);
+		// Install the UGameViewportClient::Draw detour on the address resolved
+		// back in OnPluginLoadHooks.
+		uintptr_t addr = g_viewportDrawAddr;
 		if (!addr)
 		{
-			LOG_ERROR("[Compass] UGameViewportClient::Draw pattern not found -- compass will not render");
+			LOG_ERROR("[Compass] UGameViewportClient::Draw unresolved -- compass will not render");
 			return false;
 		}
 
