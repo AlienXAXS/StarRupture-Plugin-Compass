@@ -17,6 +17,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="aob_patterns.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="plugin.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -2,6 +2,7 @@
 #include "compass_textures.h"
 #include "plugin_helpers.h"
 #include "plugin_config.h"
+#include "../aob_patterns.h"
 #include "Engine_classes.hpp"
 #include "ChimeraUI_classes.hpp"
 #include "../layout/layout.h"
@@ -22,11 +23,6 @@ namespace Compass
 	// ---------------------------------------------------------------------------
 	// Viewport draw hook (optional AOB path)
 	// ---------------------------------------------------------------------------
-
-	static constexpr const char* VIEWPORT_DRAW_PATTERN =
-		"48 89 5C 24 ?? 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ?? ?? ?? ?? "
-		"48 81 EC ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 33 C4 48 89 85 ?? ?? ?? ?? "
-		"45 33 FF 48 89 55";
 
 	using ViewportDraw_t = void(__fastcall*)(void*, void*, void*);
 	static ViewportDraw_t g_originalViewportDraw = nullptr;
@@ -119,13 +115,17 @@ namespace Compass
 	// ---------------------------------------------------------------------------
 	// Calling this before ScanPlayerMarkers forces the subsystem to refresh its
 	// PlayersMarkerDataContainer immediately, rather than waiting for the game to
-	// set the flag at localPC+3816 and process it on the next gameplay tick.
+	// set bMapMenuOpen and process it on the next gameplay tick.
 	// ---------------------------------------------------------------------------
 
 	using GatherPlayersData_t = void(__fastcall*)(void* thisSubsystem);
 	static GatherPlayersData_t g_gatherPlayersDataFn = nullptr;
 	static void* g_mapManuSubsystem = nullptr;
 	static SDK::UWorld* g_mapManuWorld = nullptr;
+
+	// Filled in by ResolvePatterns; 0 means the pattern missed on this build and
+	// player markers fall back to the game's own once-per-tick refresh.
+	static uintptr_t g_gatherPlayersDataAddr = 0;
 
 	static bool CallGatherPlayersData(GatherPlayersData_t fn, void* subsystem)
 	{
@@ -249,7 +249,7 @@ namespace Compass
 		// AFTER this frame anyway, making it equivalent but less clear in intent.
 		SDK::APlayerController* localPC = SDK::UGameplayStatics::GetPlayerController(world, 0);
 		if (localPC)
-			*(uint8_t*)((char*)localPC + 3816) = 1;
+			*(uint8_t*)((char*)localPC + AobPatterns::Offsets::ACrPlayerControllerBase_bMapMenuOpen) = 1;
 	}
 
 	// ---------------------------------------------------------------------------
@@ -835,7 +835,17 @@ namespace Compass
 		// Optional: a miss leaves the plugin loaded but silent, which is what the
 		// old scan-at-init path did. The loader still lists it for the user.
 		g_viewportDrawAddr = scanner->ResolveOptional(
-			self, "UGameViewportClient::Draw", VIEWPORT_DRAW_PATTERN);
+			self, "UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw);
+
+		// Unique rather than plain Optional: this pattern's prologue is shared
+		// with at least one unrelated function on some builds, and taking the
+		// first of several matches means calling into whichever one happens to
+		// sit lower in the image. Demanding exactly one match turns that into a
+		// visible resolve failure instead.
+		const char* gatherPatterns[] = { AobPatterns::UCrMapManuSubsystem_GatherPlayersData };
+		g_gatherPlayersDataAddr = scanner->ResolveOptionalUnique(
+			self, "UCrMapManuSubsystem::GatherPlayersData",
+			gatherPatterns, 1, nullptr);
 	}
 
 	bool Install(IPluginSelf* self)
@@ -863,12 +873,12 @@ namespace Compass
 		g_self  = self;
 		g_hooks = hooks;
 
-		// Resolve GatherPlayersData from the modloader's pre-scanned address cache.
-		uintptr_t gatherAddr = hooks->HUD->GetGatherPlayersDataAddress();
-		if (gatherAddr)
+		// GatherPlayersData comes from our own scan back in OnPluginLoadHooks, not
+		// from the modloader's cache -- see aob_patterns.h for why.
+		if (g_gatherPlayersDataAddr)
 		{
-			g_gatherPlayersDataFn = reinterpret_cast<GatherPlayersData_t>(gatherAddr);
-			LOG_INFO("[Compass] GatherPlayersData at 0x%llX", static_cast<unsigned long long>(gatherAddr));
+			g_gatherPlayersDataFn = reinterpret_cast<GatherPlayersData_t>(g_gatherPlayersDataAddr);
+			LOG_INFO("[Compass] GatherPlayersData at 0x%llX", static_cast<unsigned long long>(g_gatherPlayersDataAddr));
 		}
 		else
 		{

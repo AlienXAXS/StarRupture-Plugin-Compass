@@ -177,6 +177,7 @@
     <ClInclude Include="layout\layout_hlod.h" />
     <ClInclude Include="layout\layout_playermarkers.h" />
     <ClInclude Include="layout\layout_custompins.h" />
+    <ClInclude Include="aob_patterns.h" />
     <ClInclude Include="plugin.h" />
     <ClInclude Include="plugin_config.h" />
     <ClInclude Include="plugin_helpers.h" />
