@@ -827,6 +827,18 @@ namespace Compass
 	// Install / Remove
 	// ---------------------------------------------------------------------------
 
+	static uintptr_t ResolveFunction(IPluginSelf* self, IPluginHookScanner* scanner,
+		const char* hookName, const char* pattern)
+	{
+		PluginScanRequest req = PLUGIN_SCAN_REQUEST_INIT;
+		req.hookName = hookName;
+		req.pattern  = pattern;
+		req.kind     = PLUGIN_SCAN_FUNCTION_START;
+		req.flags    = PLUGIN_SCAN_FLAG_OPTIONAL;
+
+		return scanner->Resolve(self, &req);
+	}
+
 	void ResolvePatterns(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		if (!self || !scanner)
@@ -834,18 +846,22 @@ namespace Compass
 
 		// Optional: a miss leaves the plugin loaded but silent, which is what the
 		// old scan-at-init path did. The loader still lists it for the user.
-		g_viewportDrawAddr = scanner->ResolveOptional(
-			self, "UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw);
+		//
+		// FUNCTION_START on both: Draw is detoured and GatherPlayersData is
+		// called, and either way the address has to be a function's primary
+		// entry. The loader checks that against the exception directory.
+		g_viewportDrawAddr = ResolveFunction(self, scanner,
+			"UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw);
 
-		// Unique rather than plain Optional: this pattern's prologue is shared
-		// with at least one unrelated function on some builds, and taking the
-		// first of several matches means calling into whichever one happens to
-		// sit lower in the image. Demanding exactly one match turns that into a
-		// visible resolve failure instead.
-		const char* gatherPatterns[] = { AobPatterns::UCrMapManuSubsystem_GatherPlayersData };
-		g_gatherPlayersDataAddr = scanner->ResolveOptionalUnique(
-			self, "UCrMapManuSubsystem::GatherPlayersData",
-			gatherPatterns, 1, nullptr);
+		// GatherPlayersData used to go through ResolveOptionalUnique, because its
+		// prologue is shared with at least one unrelated function on some builds
+		// and taking the first of several matches means calling into whichever
+		// one sits lower in the image. That is the default rule now -- every
+		// resolve demands exactly one match -- so the plain call says the same
+		// thing, and FUNCTION_START adds the check the old path never made.
+		g_gatherPlayersDataAddr = ResolveFunction(self, scanner,
+			"UCrMapManuSubsystem::GatherPlayersData",
+			AobPatterns::UCrMapManuSubsystem_GatherPlayersData);
 	}
 
 	bool Install(IPluginSelf* self)
