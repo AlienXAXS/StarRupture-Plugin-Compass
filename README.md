@@ -67,3 +67,9 @@ Clone the repo, open `Compass_Plugin.sln`, and build the `Client Release|x64` co
 ## Disclaimer
 
 Use at your own risk. The authors are not responsible for any damage caused by using this software.
+
+## Credits
+
+Original mod by [@AlienXAXS](https://github.com/AlienXAXS).
+
+Maintained by [@msantoro12](https://github.com/msantoro12).
