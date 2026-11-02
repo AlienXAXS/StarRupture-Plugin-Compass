@@ -1,0 +1,1 @@
+When a game update moves data the plugin reads, it turns off one marker type instead of the whole plugin
