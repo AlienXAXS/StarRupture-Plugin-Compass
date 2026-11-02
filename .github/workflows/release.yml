@@ -162,7 +162,7 @@ jobs:
           $notesFile = "$ws\UPDATE_NOTES.txt"
           $noteLines = @()
           if (Test-Path $notesFile) {
-            $noteLines = @(Get-Content $notesFile | ForEach-Object { ($_.Trim() -replace '^[-*]\s+', '') } | Where-Object { $_ })
+            $noteLines = @(Get-Content $notesFile | ForEach-Object { ($_.Trim() -replace '^[-*](\s+|$)', '') } | Where-Object { $_ })
           }
 
           # Per-plugin update manifest

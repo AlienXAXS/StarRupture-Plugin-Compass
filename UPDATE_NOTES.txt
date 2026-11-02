@@ -1,1 +1,0 @@
-- Keeps working after a game update: if something changes, one feature turns off instead of the whole plugin
