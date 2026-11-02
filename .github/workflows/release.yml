@@ -156,6 +156,15 @@ jobs:
           $dllSrc = "$ws\build\$variant Release\Plugins\$name.dll"
           Copy-Item $dllSrc "$ws\$name-$variant.dll"
 
+          # Player-facing notes: one change per line in UPDATE_NOTES.txt, each line a
+          # bullet on the GitHub release page. The loader draws its own bullet in the
+          # Plugins Updated window, so the leading "- " is dropped here.
+          $notesFile = "$ws\UPDATE_NOTES.txt"
+          $noteLines = @()
+          if (Test-Path $notesFile) {
+            $noteLines = @(Get-Content $notesFile | ForEach-Object { ($_.Trim() -replace '^[-*]\s+', '') } | Where-Object { $_ })
+          }
+
           # Per-plugin update manifest
           $manifest = [ordered]@{
             plugin_name           = $name
@@ -163,6 +172,9 @@ jobs:
             interface_version_min = $ifaceMin
             interface_version_max = $ifaceMax
             download_url          = "https://github.com/$repo/releases/download/$tag/$name-$variant.dll"
+          }
+          if ($noteLines.Count -gt 0) {
+            $manifest["notes"] = $noteLines -join "`n"
           }
           $manifest | ConvertTo-Json -Depth 1 | Out-File "$ws\$name-$varLower-manifest.json" -Encoding utf8NoBOM
           Write-Host "Generated manifest:"
@@ -205,8 +217,16 @@ jobs:
           Write-Host "Uploading $($assets.Count) asset(s):"
           $assets | ForEach-Object { Write-Host "  $_" }
 
+          # Put UPDATE_NOTES.txt above the generated list when it exists.
+          $notesArgs = @()
+          $notesFile = "$ws\UPDATE_NOTES.txt"
+          if ((Test-Path $notesFile) -and (Get-Content $notesFile | Where-Object { $_.Trim() })) {
+            $notesArgs = @("--notes-file", $notesFile)
+          }
+
           gh release create $tag @assets `
             --title "Compass Plugin $tag" `
+            @notesArgs `
             --generate-notes
 
       - name: Upload Client build to Nexus Mods
