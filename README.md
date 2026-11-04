@@ -43,7 +43,7 @@ Config is stored in `Plugins\config\Compass.ini` and is generated on first launc
 
 3. After the first launch, edit `Plugins\config\Compass.ini` and set `Enabled=1`.
 
-> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader)** to be installed first.
+> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.23.0 or later** to be installed first.
 
 ---
 
