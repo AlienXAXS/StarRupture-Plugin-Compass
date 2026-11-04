@@ -133,6 +133,7 @@ jobs:
             /v:minimal
 
       - name: Generate release assets
+        id: assets
         shell: pwsh
         run: |
           $tag      = "${{ steps.tag.outputs.TAG }}"
@@ -167,6 +168,11 @@ jobs:
           if (Test-Path $notesFile) {
             $noteLines = @(Get-Content $notesFile | ForEach-Object { ($_.Trim() -replace '^[-*](\s+|$)', '') } | Where-Object { $_ })
           }
+
+          # The same lines are the Nexus changelog entry for this version.
+          $changelog = if ($noteLines.Count -gt 0) { $noteLines -join "`n" } else { "See https://github.com/$repo/releases/tag/$tag" }
+          $delim = "EOF_" + [guid]::NewGuid().ToString('N')
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "changelog<<$delim`n$changelog`n$delim"
 
           # Per-plugin update manifest
           $manifest = [ordered]@{
@@ -233,13 +239,16 @@ jobs:
             --generate-notes
 
       - name: Upload Client build to Nexus Mods
-        uses: Nexus-Mods/upload-action@main
+        uses: msantoro12/starrupture-release-actions/nexus-publish@nexus-publish-v1
         with:
           api_key: ${{ secrets.NEXUS_APIKEY }}
+          # Global (v3 API) id of the mod page: GET /v3/games/starrupture/mods/110 -> data.id
+          mod_id: '37074157699182'
           file_id: ${{ secrets.NEXUS_CLIENT_GROUP_ID }}
           filename: ${{ github.workspace }}\Compass_Plugin-Client-${{ steps.tag.outputs.TAG }}.zip
-          archive_existing_version: true
-          allow_mod_manager_download: false
           display_name: "Compass Client ${{ steps.tag.outputs.TAG }}"
-          description: "Changelog: https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.TAG }}"
+          file_description: "Changelog: https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.TAG }}"
           version: ${{ steps.tag.outputs.NEXUS_VERSION }}
+          changelog: ${{ steps.assets.outputs.changelog }}
+          description_file: nexus/description.bbcode
+          tag: ${{ steps.tag.outputs.TAG }}
