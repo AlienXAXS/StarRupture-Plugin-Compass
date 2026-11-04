@@ -49,6 +49,8 @@ Config is stored in `Plugins\config\Compass.ini` and is generated on first launc
 
 ## Troubleshooting
 
+Found a bug? [Report it on GitHub](https://github.com/AlienXAXS/StarRupture-Plugin-Compass/issues) and attach your `ModLoader.log` (in `<game>\StarRupture\Binaries\Win64\ModLoader\Logs\`).
+
 | Problem | Solution |
 |---|---|
 | Compass not visible | Confirm `Enabled=1` is set in `Plugins\config\Compass.ini`. |
