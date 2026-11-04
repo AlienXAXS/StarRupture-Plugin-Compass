@@ -760,6 +760,25 @@ namespace Compass
 		LoadAllTextures(world);
 	}
 
+	// Hot-load seed: the plugin installed after ChimeraMain began, so
+	// OnAnyWorldBeginPlay will never fire for this world. The loader calls this on
+	// the first tick after we register if ChimeraMain is already running.
+	static void OnUIStateChanged(uint64_t /*oldState*/, uint64_t newState, void* /*userData*/)
+	{
+		if (!(newState & PLUGIN_UI_IN_GAMEPLAY) || s_isChimeraMain) return;
+
+		try
+		{
+			SDK::UWorld* currentWorld = PluginSdkRuntime::GetWorld();
+			if (!currentWorld) return;
+
+			s_isChimeraMain = true;
+			LoadAllTextures(currentWorld);
+			LOG_INFO("[Compass] Install: already in ChimeraMain -- s_isChimeraMain set");
+		}
+		catch (...) {}
+	}
+
 	static void OnBeforeWorldEndPlay(SDK::UWorld* /*world*/, const char* worldName)
 	{
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: '%s' — clearing all caches and stale pointers", worldName);
@@ -954,18 +973,9 @@ namespace Compass
 		hooks->UI->RegisterOnConfigChanged(self, OnConfigChanged);
 
 		// Hot-load seed: if we're already in ChimeraMain when the plugin installs,
-		// OnAnyWorldBeginPlay will never fire for this world, so set the flag now.
-		try
-		{
-			SDK::UWorld* currentWorld = PluginSdkRuntime::GetWorld();
-			if (currentWorld && currentWorld->GetName() == "ChimeraMain")
-			{
-				s_isChimeraMain = true;
-				LoadAllTextures(currentWorld);
-				LOG_INFO("[Compass] Install: already in ChimeraMain -- s_isChimeraMain set");
-			}
-		}
-		catch (...) {}
+		// OnUIStateChanged sets the flag on the loader's next tick.
+		if (hooks->GameMenu)
+			hooks->GameMenu->RegisterOnUIStateChanged(PLUGIN_UI_IN_GAMEPLAY, OnUIStateChanged, nullptr);
 
 		// Clear stale state before world teardown.
 		hooks->World->RegisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
@@ -1000,6 +1010,9 @@ namespace Compass
 			g_hooks->World->UnregisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
 			LOG_INFO("[Compass] World callbacks unregistered");
 		}
+
+		if (g_hooks && g_hooks->GameMenu)
+			g_hooks->GameMenu->UnregisterOnUIStateChanged(OnUIStateChanged, nullptr);
 
 		g_hooks        = nullptr;
 		g_self         = nullptr;
