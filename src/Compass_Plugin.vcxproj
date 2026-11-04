@@ -179,6 +179,7 @@
     <ClInclude Include="layout\layout_custompins.h" />
     <ClInclude Include="aob_patterns.h" />
     <ClInclude Include="plugin.h" />
+    <ClInclude Include="compass_fields.h" />
     <ClInclude Include="plugin_config.h" />
     <ClInclude Include="plugin_helpers.h" />
   </ItemGroup>

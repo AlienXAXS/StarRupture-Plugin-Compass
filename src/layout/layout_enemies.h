@@ -3,6 +3,7 @@
 #include <vector>
 #include "MassAIPrototypeEnemyRuntime_classes.hpp"
 #include "../plugin_helpers.h"
+#include "../compass_fields.h"
 
 // ---------------------------------------------------------------------------
 // Enemy scanning
@@ -41,7 +42,7 @@ namespace Layout
 			auto* enemy = static_cast<SDK::AMassEnemyCharacterBase*>(actor);
 
 			// Dissolve > 0 means the death/dissolve sequence has started -- skip
-			if (enemy->Dissolve > 0.0f)
+			if (CompassFields::ValueOr<float>(CompassFields::EnemyDissolve, enemy) > 0.0f)
 				continue;
 
 			EnemyEntry e;

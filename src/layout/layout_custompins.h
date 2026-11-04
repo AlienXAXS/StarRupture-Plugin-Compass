@@ -5,6 +5,7 @@
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
 #include "../plugin_helpers.h"
+#include "../compass_fields.h"
 
 namespace Layout
 {
@@ -29,20 +30,29 @@ namespace Layout
 		if (!gameState)
 			return result;
 
-		auto& pins = gameState->PlayerPersonalMarkers;
+		const auto* pinsArray = CompassFields::PlayerPersonalMarkers.In(gameState);
+		if (!pinsArray)
+			return result;
+		const auto& pins = *pinsArray;
 		LOG_TRACE("[ScanCustomPins] gameState=%p pins.Num()=%d", static_cast<void*>(gameState), pins.Num());
 
 		for (int i = 0; i < pins.Num(); i++)
 		{
 			const auto& item = pins[i];
 
+			const SDK::FVector2f* position = CompassFields::PinPosition.In(&item);
+			const SDK::FString* playerName = CompassFields::PinPlayerName.In(&item);
+			const SDK::FLinearColor* color = CompassFields::PinColor.In(&item);
+			if (!position || !playerName || !color)
+				continue;
+
 			CustomPinEntry e;
-			e.location = {item.MarkerPosition.X, item.MarkerPosition.Y, 0.0f};
-			const wchar_t* p = item.PlayerName.CStr();
-			e.playerName = (p && item.PlayerName.Num() > 0)
+			e.location = {position->X, position->Y, 0.0f};
+			const wchar_t* p = playerName->CStr();
+			e.playerName = (p && playerName->Num() > 0)
 				               ? (std::wstring(p) + L"'s Marker")
 				               : L"'s Marker";
-			e.color = item.PlayerColor;
+			e.color = *color;
 
 			LOG_TRACE("[ScanCustomPins] [%d] player='%ls' loc=(%.0f,%.0f)",
 			          i, e.playerName.c_str(), e.location.X, e.location.Y);

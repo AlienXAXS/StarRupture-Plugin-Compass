@@ -60,4 +60,23 @@
     </ClCompile>
   </ItemDefinitionGroup>
 
+  <!-- ============================================================
+       PLUGIN_GAME_BUILT_CL
+       The game build (CL) the plugin's candidate rows are for. Pinned
+       here; a build passes /p:PluginGameBuiltCL=<CL> to override it.
+       PluginGameBuild.props (Plugin SDK) turns it into the define that
+       plugin_interface.h stores in PluginInfo::gameBuiltCL.
+       ============================================================ -->
+  <PropertyGroup>
+    <PluginGameBuiltCL Condition="'$(PluginGameBuiltCL)' == ''">127004</PluginGameBuiltCL>
+  </PropertyGroup>
+  <Import Project="$(PluginSDKInclude)\..\PluginGameBuild.props"
+          Condition="Exists('$(PluginSDKInclude)\..\PluginGameBuild.props')" />
+
+  <!-- Rule 3: a plugin never reads a game-class member directly (Plugin SDK tools\Rule3Check.targets).
+       Reports until the plugin sets PLUGIN_MAP_MIGRATED, then fails the build. -->
+  <PropertyGroup>
+    <Rule3Plugin>Compass</Rule3Plugin>
+  </PropertyGroup>
+  <Import Project="$(PluginSDKInclude)\..\tools\Rule3Check.targets" Condition="Exists('$(PluginSDKInclude)\..\tools\Rule3Check.targets')" />
 </Project>

@@ -4,6 +4,7 @@
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
 #include "../plugin_helpers.h"
+#include "../compass_fields.h"
 
 // ---------------------------------------------------------------------------
 // Foundable scanning
@@ -39,24 +40,32 @@ namespace Layout
 		auto* gameState = world->GameState
 			                  ? static_cast<SDK::ACrGameStateBase*>(world->GameState)
 			                  : nullptr;
-		auto* mapHelper = gameState ? gameState->MapMenuDataReplicationHelper : nullptr;
+		auto* mapHelper = CompassFields::MapHelperOf(gameState);
 		if (!mapHelper)
 			return result;
 
-		auto& data = mapHelper->FoundableMarkerDataContainer.FoundableMarkerData;
+		const auto* dataArray = CompassFields::ArrayIn(CompassFields::FoundableContainer, CompassFields::FoundableData, mapHelper);
+		if (!dataArray)
+			return result;
+		const auto& data = *dataArray;
 		LOG_TRACE("[ScanFoundables] mapHelper=%p data.Num()=%d", static_cast<void*>(mapHelper), data.Num());
 
 		for (int i = 0; i < data.Num(); i++)
 		{
 			const auto& item = data[i];
 
-			if (item.FoundableType == SDK::ECrFoundableType::Undefined ||
-				item.FoundableType == SDK::ECrFoundableType::ECrFoundableType_MAX)
+			const SDK::ECrFoundableType* foundableType = CompassFields::FoundableType.In(&item);
+			const SDK::FVector2f* location = CompassFields::FoundableLocation.In(&item);
+			if (!foundableType || !location)
+				continue;
+
+			if (*foundableType == SDK::ECrFoundableType::Undefined ||
+				*foundableType == SDK::ECrFoundableType::ECrFoundableType_MAX)
 				continue;
 
 			FoundableEntry e;
-			e.location = {item.Location.X, item.Location.Y, 0.0f};
-			e.type = static_cast<FoundableType>(static_cast<int>(item.FoundableType));
+			e.location = {location->X, location->Y, 0.0f};
+			e.type = static_cast<FoundableType>(static_cast<int>(*foundableType));
 
 			LOG_TRACE("[ScanFoundables] [%d] type=%d loc=(%.0f,%.0f)",
 			          i, static_cast<int>(e.type), e.location.X, e.location.Y);

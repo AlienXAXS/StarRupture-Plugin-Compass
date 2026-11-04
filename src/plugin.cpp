@@ -2,6 +2,7 @@
 #include "plugin_helpers.h"
 #include "plugin_config.h"
 #include "compass/compass.h"
+#include "compass_fields.h"
 
 static IPluginSelf* g_self = nullptr;
 
@@ -17,7 +18,9 @@ static PluginInfo s_pluginInfo = {
 	"AlienX",
 	"Client-side HUD compass overlay",
 	PLUGIN_INTERFACE_VERSION,
-	PLUGIN_TARGET_CLIENT
+	PLUGIN_TARGET_CLIENT,
+	PLUGIN_GAME_BUILT_CL,
+	PLUGIN_MAP_MIGRATED
 };
 
 extern "C" {
@@ -33,11 +36,17 @@ extern "C" {
 	__declspec(dllexport) void OnPluginLoadHooks(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		g_self = self;
+		CompassFields::DeclareFeatures(self, scanner);
+		CompassFields::Resolve(self, scanner);
 		Compass::ResolvePatterns(self, scanner);
 	}
 
 	__declspec(dllexport) bool PluginInit(IPluginSelf* self)
 	{
+		// First, before any early return: off its game build the loader refuses
+		// a plugin whose PluginInit did not take the globals.
+		PluginSdkRuntime::Init(self->hooks);
+
 		g_self = self;
 
 		LOG_INFO("Compass plugin initializing...");

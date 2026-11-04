@@ -5,6 +5,7 @@
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
 #include "../plugin_helpers.h"
+#include "../compass_fields.h"
 
 namespace Layout
 {
@@ -52,9 +53,9 @@ namespace Layout
 
 			BaseCoreEntry e;
 			e.location = core->K2_GetActorLocation();
-			e.upgradeLevel = core->UpgradeLevel;
-			e.bIsAttacked = core->bIsAttacked;
-			e.bIsInfected = core->IsInfected;
+			e.upgradeLevel = CompassFields::ValueOr<SDK::uint8>(CompassFields::BaseCoreUpgradeLevel, core);
+			e.bIsAttacked = CompassFields::ValueOr<bool>(CompassFields::BaseCoreIsAttacked, core);
+			e.bIsInfected = CompassFields::ValueOr<bool>(CompassFields::BaseCoreIsInfected, core);
 
 			// 1. Player-set custom name
 			if (nameSys)
@@ -122,7 +123,7 @@ namespace Layout
 			                  : nullptr;
 		LOG_TRACE("[ScanBaseCores] gameState=%p", static_cast<void*>(gameState));
 
-		auto* mapHelper = gameState ? gameState->MapMenuDataReplicationHelper : nullptr;
+		auto* mapHelper = CompassFields::MapHelperOf(gameState);
 		LOG_TRACE("[ScanBaseCores] mapHelper=%p (from GameState)", static_cast<void*>(mapHelper));
 
 		// Spawn a local helper if the real one hasn't arrived yet.
@@ -150,7 +151,8 @@ namespace Layout
 				SDK::UGameplayStatics::FinishSpawningActor(spawned, transform,
 				                                           SDK::ESpawnActorScaleMethod::OverrideRootScale);
 				s_fakeHelper = static_cast<SDK::ACrMapMenuDataReplicationHelper*>(spawned);
-				gameState->MapMenuDataReplicationHelper = s_fakeHelper;
+				if (auto* helperSlot = CompassFields::MapMenuHelper.In(gameState))
+					*helperSlot = s_fakeHelper;
 				mapHelper = s_fakeHelper;
 				LOG_TRACE("[ScanBaseCores] Spawned local helper %p — UCrMapManuSubsystem will populate it next tick",
 				          static_cast<void*>(s_fakeHelper));
@@ -169,9 +171,10 @@ namespace Layout
 			LOG_TRACE("[ScanBaseCores] No gameState — cannot spawn helper yet");
 		}
 
-		if (mapHelper)
+		const auto* bmdArray = CompassFields::ArrayIn(CompassFields::BuildingsContainer, CompassFields::BuildingsData, mapHelper);
+		if (mapHelper && bmdArray)
 		{
-			auto& bmd = mapHelper->BuildingsMarkerDataContainer.BuildingsMarkerData;
+			const auto& bmd = *bmdArray;
 			LOG_TRACE("[ScanBaseCores] mapHelper=%p bmd.Num()=%d", static_cast<void*>(mapHelper), bmd.Num());
 
 			if (bmd.Num() > 0)
@@ -181,12 +184,16 @@ namespace Layout
 				for (int i = 0; i < bmd.Num(); i++)
 				{
 					const auto& item = bmd[i];
-					const std::string uniqueName = item.BuildingUniqueName.ToString();
+					const SDK::FName* uniqueFName = CompassFields::BuildingUniqueName.In(&item);
+					const SDK::FVector2f* itemLoc = CompassFields::BuildingLocation.In(&item);
+					if (!uniqueFName || !itemLoc)
+						continue;
+					const std::string uniqueName = uniqueFName->ToString();
 					LOG_TRACE("[ScanBaseCores] bmd[%d] UniqueName='%s' loc=(%.0f,%.0f)",
-					          i, uniqueName.c_str(), item.Location.X, item.Location.Y);
+					          i, uniqueName.c_str(), itemLoc->X, itemLoc->Y);
 					if (uniqueName != "BaseCore")
 						continue;
-					s_distantCoreCache.push_back({item.Location.X, item.Location.Y, 0.0f});
+					s_distantCoreCache.push_back({itemLoc->X, itemLoc->Y, 0.0f});
 				}
 				LOG_TRACE("[ScanBaseCores] bmd cache rebuilt: %d distant cores from %d total entries",
 				          static_cast<int>(s_distantCoreCache.size()), bmd.Num());
