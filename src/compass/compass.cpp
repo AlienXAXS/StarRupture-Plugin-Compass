@@ -888,8 +888,13 @@ namespace Compass
 		// FUNCTION_START on both: Draw is detoured and GatherPlayersData is
 		// called, and either way the address has to be a function's primary
 		// entry. The loader checks that against the exception directory.
-		g_viewportDrawAddr = ResolveFunction(self, scanner,
-			"UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw);
+		//
+		// Draw is a key in the loader's map, so a game update that moves it is a
+		// map row and not a new plugin build. The pattern stays as the fallback
+		// for a loader whose map has no row for the running build.
+		g_viewportDrawAddr = PluginMap::Function(scanner, self,
+			"UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw,
+			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 
 		// GatherPlayersData used to go through ResolveOptionalUnique, because its
 		// prologue is shared with at least one unrelated function on some builds
