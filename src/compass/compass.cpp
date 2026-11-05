@@ -865,18 +865,6 @@ namespace Compass
 	// Install / Remove
 	// ---------------------------------------------------------------------------
 
-	static uintptr_t ResolveFunction(IPluginSelf* self, IPluginHookScanner* scanner,
-		const char* hookName, const char* pattern)
-	{
-		PluginScanRequest req = PLUGIN_SCAN_REQUEST_INIT;
-		req.hookName = hookName;
-		req.pattern  = pattern;
-		req.kind     = PLUGIN_SCAN_FUNCTION_START;
-		req.flags    = PLUGIN_SCAN_FLAG_OPTIONAL;
-
-		return scanner->Resolve(self, &req);
-	}
-
 	void ResolvePatterns(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		if (!self || !scanner)
@@ -896,15 +884,13 @@ namespace Compass
 			"UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw,
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 
-		// GatherPlayersData used to go through ResolveOptionalUnique, because its
-		// prologue is shared with at least one unrelated function on some builds
-		// and taking the first of several matches means calling into whichever
-		// one sits lower in the image. That is the default rule now -- every
-		// resolve demands exactly one match -- so the plain call says the same
-		// thing, and FUNCTION_START adds the check the old path never made.
-		g_gatherPlayersDataAddr = ResolveFunction(self, scanner,
+		// GatherPlayersData is a map key too. Its prologue is shared with at least
+		// one unrelated function on some builds, so the pattern fallback demands
+		// exactly one match, as every resolve does.
+		g_gatherPlayersDataAddr = PluginMap::Function(scanner, self,
 			"UCrMapManuSubsystem::GatherPlayersData",
-			AobPatterns::UCrMapManuSubsystem_GatherPlayersData);
+			AobPatterns::UCrMapManuSubsystem_GatherPlayersData,
+			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 	}
 
 	bool Install(IPluginSelf* self)
