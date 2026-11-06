@@ -12,7 +12,7 @@ jobs:
   release:
     permissions:
       contents: write
-    uses: AlienXAXS/StarRupture-Plugin-SDK/.github/workflows/plugin-release.yml@v1.23.0
+    uses: AlienXAXS/StarRupture-Plugin-SDK/.github/workflows/plugin-release.yml@v1.23.1
     with:
       plugin_name: Compass_Plugin
       solution_file: Compass_Plugin.sln
