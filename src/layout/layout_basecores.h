@@ -183,9 +183,9 @@ namespace Layout
 				s_distantCoreCache.clear();
 				for (int i = 0; i < bmd.Num(); i++)
 				{
-					const auto& item = bmd[i];
-					const SDK::FName* uniqueFName = CompassFields::BuildingUniqueName.In(&item);
-					const SDK::FVector2f* itemLoc = CompassFields::BuildingLocation.In(&item);
+					const uint8_t* item = PluginMap::ElementAt(bmd, i, CompassFields::BuildingItemSize);
+					const SDK::FName* uniqueFName = CompassFields::BuildingUniqueName.In(item);
+					const SDK::FVector2f* itemLoc = CompassFields::BuildingLocation.In(item);
 					if (!uniqueFName || !itemLoc)
 						continue;
 					const std::string uniqueName = uniqueFName->ToString();

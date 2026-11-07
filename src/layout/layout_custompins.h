@@ -38,11 +38,11 @@ namespace Layout
 
 		for (int i = 0; i < pins.Num(); i++)
 		{
-			const auto& item = pins[i];
+			const uint8_t* item = PluginMap::ElementAt(pins, i, CompassFields::PinItemSize);
 
-			const SDK::FVector2f* position = CompassFields::PinPosition.In(&item);
-			const SDK::FString* playerName = CompassFields::PinPlayerName.In(&item);
-			const SDK::FLinearColor* color = CompassFields::PinColor.In(&item);
+			const SDK::FVector2f* position = CompassFields::PinPosition.In(item);
+			const SDK::FString* playerName = CompassFields::PinPlayerName.In(item);
+			const SDK::FLinearColor* color = CompassFields::PinColor.In(item);
 			if (!position || !playerName || !color)
 				continue;
 

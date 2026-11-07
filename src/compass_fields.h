@@ -49,12 +49,13 @@ namespace CompassFields
 	inline auto PinPlayerName      = COMPASS_FIELD(FCrPlayerPersonalMarkerData, PlayerName);
 	inline auto PinColor           = COMPASS_FIELD(FCrPlayerPersonalMarkerData, PlayerColor);
 
-	// The marker arrays are walked with the compiled element size, so each
-	// element struct is checked against the running build.
-	inline auto BuildingItemSize  = SR_SIZE_CHECK(FBuildingMarkerDataFastArrayItem);
-	inline auto FoundableItemSize = SR_SIZE_CHECK(FFoundableMarkerDataFastArrayItem);
-	inline auto PlayerItemSize    = SR_SIZE_CHECK(FPlayerMarkerDataFastArrayItem);
-	inline auto PinItemSize       = SR_SIZE_CHECK(FCrPlayerPersonalMarkerData);
+	// Structs stepped through as array elements: the size the running game
+	// reflects, read with PluginMap::ElementAt, so a build that resizes one does
+	// not turn the compass off.
+	inline auto BuildingItemSize  = SR_SIZE(FBuildingMarkerDataFastArrayItem);
+	inline auto FoundableItemSize = SR_SIZE(FFoundableMarkerDataFastArrayItem);
+	inline auto PlayerItemSize    = SR_SIZE(FPlayerMarkerDataFastArrayItem);
+	inline auto PinItemSize       = SR_SIZE(FCrPlayerPersonalMarkerData);
 
 	// ACrPlayerControllerBase::bMapMenuOpen is a native bool with no UPROPERTY.
 	// UCrMapManuSubsystem::UpdateMapMenuData tests it on each player controller

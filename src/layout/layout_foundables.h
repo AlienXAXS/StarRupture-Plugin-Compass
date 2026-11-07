@@ -52,10 +52,10 @@ namespace Layout
 
 		for (int i = 0; i < data.Num(); i++)
 		{
-			const auto& item = data[i];
+			const uint8_t* item = PluginMap::ElementAt(data, i, CompassFields::FoundableItemSize);
 
-			const SDK::ECrFoundableType* foundableType = CompassFields::FoundableType.In(&item);
-			const SDK::FVector2f* location = CompassFields::FoundableLocation.In(&item);
+			const SDK::ECrFoundableType* foundableType = CompassFields::FoundableType.In(item);
+			const SDK::FVector2f* location = CompassFields::FoundableLocation.In(item);
 			if (!foundableType || !location)
 				continue;
 

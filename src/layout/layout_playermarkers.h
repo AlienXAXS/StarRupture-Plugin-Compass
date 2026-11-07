@@ -53,13 +53,13 @@ namespace Layout
 
 		for (int i = 0; i < data.Num(); i++)
 		{
-			const auto& item = data[i];
+			const uint8_t* item = PluginMap::ElementAt(data, i, CompassFields::PlayerItemSize);
 
-			const SDK::FString* player = CompassFields::PlayerName.In(&item);
-			const SDK::FVector2f* location = CompassFields::PlayerLocation.In(&item);
-			const SDK::FLinearColor* color = CompassFields::PlayerColor.In(&item);
-			const float* rotationZ = CompassFields::PlayerRotationZ.In(&item);
-			const SDK::EPlayerMarkerFlags* markerFlags = CompassFields::PlayerFlags.In(&item);
+			const SDK::FString* player = CompassFields::PlayerName.In(item);
+			const SDK::FVector2f* location = CompassFields::PlayerLocation.In(item);
+			const SDK::FLinearColor* color = CompassFields::PlayerColor.In(item);
+			const float* rotationZ = CompassFields::PlayerRotationZ.In(item);
+			const SDK::EPlayerMarkerFlags* markerFlags = CompassFields::PlayerFlags.In(item);
 			if (!player || !location || !color || !rotationZ || !markerFlags)
 				continue;
 
