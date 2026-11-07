@@ -9,6 +9,7 @@
 #include "../layout/layout.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <vector>
 
@@ -734,12 +735,70 @@ namespace Compass
 	// ---------------------------------------------------------------------------
 
 	// ---------------------------------------------------------------------------
+	// Draw guard. Right after a load, a world begin or a viewport resize, the game
+	// viewport's render target can still be without its RHI texture. A canvas that
+	// already holds our items is then flushed into it on the render thread, which
+	// asserts ("Texture", RenderTargetPool.cpp). The RHI texture belongs to the
+	// render thread and is not reachable from here, so the guard checks what the
+	// game thread can see (the viewport exists, has a size, matches the canvas and
+	// holds it steady), then waits a few frames for the render thread to catch up.
+	// kDrawSettleFrames: the first post-load frame is the one that crashed, and
+	// the render target is rebuilt within a frame or two, so 30 frames (0.5 s at
+	// 60 fps) leaves a wide margin and costs nothing visible.
+	// ---------------------------------------------------------------------------
+	static constexpr int kDrawSettleFrames = 30;
+	static std::atomic<int> s_drawSettle{ kDrawSettleFrames };
+	static bool s_drawSuppressed = false;
+	static int s_lastViewportX = 0;
+	static int s_lastViewportY = 0;
+
+	static void RestartDrawSettle()
+	{
+		s_drawSettle.store(kDrawSettleFrames);
+	}
+
+	// True when it is safe to put items on the HUD canvas this frame.
+	static bool ViewportReadyToDraw(SDK::APlayerController* pc, SDK::UCanvas* canvas)
+	{
+		int32_t vpX = 0, vpY = 0;
+		if (pc) pc->GetViewportSize(&vpX, &vpY);
+
+		const bool sized = vpX > 0 && vpY > 0
+			&& vpX == static_cast<int32_t>(canvas->SizeX)
+			&& vpY == static_cast<int32_t>(canvas->SizeY);
+		if (!sized || vpX != s_lastViewportX || vpY != s_lastViewportY)
+			RestartDrawSettle();
+		s_lastViewportX = vpX;
+		s_lastViewportY = vpY;
+
+		int left = s_drawSettle.load();
+		if (left > 0 || !sized)
+		{
+			if (left > 0) s_drawSettle.compare_exchange_strong(left, left - 1);
+			if (!s_drawSuppressed)
+			{
+				s_drawSuppressed = true;
+				LOG_INFO("[Compass] Viewport not ready (viewport=%dx%d canvas=%dx%d) -- not drawing until it settles",
+				         vpX, vpY, static_cast<int>(canvas->SizeX), static_cast<int>(canvas->SizeY));
+			}
+			return false;
+		}
+		if (s_drawSuppressed)
+		{
+			s_drawSuppressed = false;
+			LOG_INFO("[Compass] Viewport ready -- drawing resumed");
+		}
+		return true;
+	}
+
+	// ---------------------------------------------------------------------------
 	// OnExperienceLoadComplete -- fires when the gameplay experience finishes
 	// loading (game framework fully ready).  Safe game-thread context for calling
 	// StaticLoadObject without touching the streaming system mid-render.
 	// ---------------------------------------------------------------------------
 	static void OnExperienceLoadComplete()
 	{
+		RestartDrawSettle();
 		LOG_INFO("[Compass] OnExperienceLoadComplete: loading textures");
 		SDK::UWorld* world = PluginSdkRuntime::GetWorld();
 		LoadAllTextures(world);
@@ -755,6 +814,7 @@ namespace Compass
 		if (!world) return;
 		s_isChimeraMain = std::string(worldName) == "ChimeraMain";
 		if (!s_isChimeraMain) return;
+		RestartDrawSettle();
 
 		LOG_INFO("[Compass] OnAnyWorldBeginPlay: '%s' -- loading textures", worldName);
 		LoadAllTextures(world);
@@ -799,6 +859,7 @@ namespace Compass
 		// or OnAnyWorldBeginPlay for the new world.  Nulling them here prevents DrawCompass
 		// from drawing with stale pointers during the world teardown/transition gap.
 		ClearTextures();
+		RestartDrawSettle();
 
 		// Reset world tracking.
 		s_isChimeraMain = false;
@@ -842,6 +903,7 @@ namespace Compass
 
 		SDK::AHUD* hud = static_cast<SDK::AHUD*>(hudPtr);
 		if (!hud || !hud->Canvas) return;
+		if (!ViewportReadyToDraw(hud->GetOwningPlayerController(), hud->Canvas)) return;
 
 		SDK::UWorld* world = nullptr;
 		try { world = PluginSdkRuntime::GetWorld(); }

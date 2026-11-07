@@ -55,6 +55,7 @@ Found a bug? [Report it on GitHub](https://github.com/AlienXAXS/StarRupture-Plug
 |---|---|
 | Compass not visible | Confirm `Enabled=1` is set in `Plugins\config\Compass.ini`. |
 | Plugin not loading | Check `modloader.log` in `Binaries\Win64\` for errors. |
+| Compass missing for a moment after loading, a resize or an alt-tab | Expected. Compass draws nothing until the game window's viewport has settled (about half a second), then resumes by itself. This keeps the game from crashing on the first frame after a load. |
 
 ---
 
