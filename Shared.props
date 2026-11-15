@@ -2,11 +2,13 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
   <!-- ============================================================
-       Default paths for local development.
-       Override in CI via /p:GameSDKRoot=... /p:PluginSDKInclude=...
+       Default paths: PluginSDKInclude and GameSDKRoot point into the
+       sibling StarRupture-Plugin-SDK folder; GameSDKRoot uses this repo's
+       own "StarRupture SDK" submodule instead when it is checked out.
+       Override with /p:PluginSDKInclude=... /p:GameSDKRoot=...
        ============================================================ -->
   <PropertyGroup>
-    <GameSDKRoot Condition="'$(GameSDKRoot)' == '' And Exists('$(MSBuildThisFileDirectory)StarRupture SDK')">$(MSBuildThisFileDirectory)StarRupture SDK</GameSDKRoot>
+    <GameSDKRoot Condition="'$(GameSDKRoot)' == '' And Exists('$(MSBuildThisFileDirectory)StarRupture SDK\Client\SDK\Basic.cpp')">$(MSBuildThisFileDirectory)StarRupture SDK</GameSDKRoot>
     <GameSDKRoot Condition="'$(GameSDKRoot)' == ''">$(MSBuildThisFileDirectory)..\StarRupture-Plugin-SDK\StarRupture SDK</GameSDKRoot>
     <PluginSDKInclude Condition="'$(PluginSDKInclude)' == ''">$(MSBuildThisFileDirectory)..\StarRupture-Plugin-SDK\include</PluginSDKInclude>
   </PropertyGroup>
