@@ -6,8 +6,9 @@
        Override in CI via /p:GameSDKRoot=... /p:PluginSDKInclude=...
        ============================================================ -->
   <PropertyGroup>
-    <GameSDKRoot Condition="'$(GameSDKRoot)' == ''">C:\Users\markp\Documents\GitHub\StarRupture-Game-SDK</GameSDKRoot>
-    <PluginSDKInclude Condition="'$(PluginSDKInclude)' == ''">C:\Users\markp\Documents\GitHub\StarRupture-Plugin-SDK\include</PluginSDKInclude>
+    <GameSDKRoot Condition="'$(GameSDKRoot)' == '' And Exists('$(MSBuildThisFileDirectory)StarRupture SDK')">$(MSBuildThisFileDirectory)StarRupture SDK</GameSDKRoot>
+    <GameSDKRoot Condition="'$(GameSDKRoot)' == ''">$(MSBuildThisFileDirectory)..\StarRupture-Plugin-SDK\StarRupture SDK</GameSDKRoot>
+    <PluginSDKInclude Condition="'$(PluginSDKInclude)' == ''">$(MSBuildThisFileDirectory)..\StarRupture-Plugin-SDK\include</PluginSDKInclude>
   </PropertyGroup>
 
   <!-- ============================================================
