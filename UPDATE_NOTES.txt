@@ -1,1 +1,2 @@
 - The compass no longer goes missing for a moment after loading
+- Now loads on ModLoader v1.23.0 and newer
