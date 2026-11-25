@@ -231,17 +231,20 @@ namespace Compass
 
 	// ---------------------------------------------------------------------------
 	// ReleaseTextures -- gives back every reference taken, at plugin shutdown.
-	// Game thread only: off it (process exit) the references are left alone.
+	// Game thread only: off it (process exit) the references are left alone, as
+	// they are when the texture-release feature is off.
 	// ---------------------------------------------------------------------------
-	static void ReleaseTextures(bool onGameThread)
+	static void ReleaseTextures(bool onGameThread, bool featureOn)
 	{
 		if (s_retained.empty())
 			return;
 
-		if (!g_releaseRef || !onGameThread)
+		if (!g_releaseRef || !featureOn || !onGameThread)
 		{
 			LOG_INFO("[Compass] Texture refs not released (%s)",
-			         g_releaseRef ? "not on the game thread" : "ReleaseRef unavailable");
+			         !g_releaseRef ? "ReleaseRef unavailable"
+			         : !featureOn  ? "texture-release is off"
+			                       : "not on the game thread");
 			s_retained.clear();
 			s_tex = {};
 			return;

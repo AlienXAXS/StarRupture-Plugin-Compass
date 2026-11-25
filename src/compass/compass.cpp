@@ -1129,7 +1129,8 @@ namespace Compass
 
 		// Give the texture references back, on the game thread only. Shutdown also
 		// runs at process exit, off it, where the references are left alone.
-		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread());
+		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread(),
+		               CompassFields::ReleaseTextureRefs.On());
 
 		g_hooks        = nullptr;
 		g_self         = nullptr;
