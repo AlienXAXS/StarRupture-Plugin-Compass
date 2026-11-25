@@ -103,6 +103,12 @@ namespace CompassFields
 		{ "Foundables.*" } };
 	inline PluginMap::Feature EnemyMarkers{ "enemies", "Enemy dots on the compass",
 		{ "AMassEnemyCharacterBase::Dissolve" }, { "Enemies.*" } };
+	// UObject::ReleaseRef gives back the references the icon textures hold. It is a
+	// map key with no pattern of our own, so it is declared here: on a build the
+	// map has no row for, this part is off (the references are held until the
+	// process exits) and the compass is not refused.
+	inline PluginMap::Feature ReleaseTextureRefs{ "texture-release", "Releasing compass icon textures on unload",
+		{ "UObject::ReleaseRef" }, {} };
 	inline PluginMap::Feature CustomPinMarkers{ "custompins", "Your map pins on the compass",
 		{ "ACrGameStateBase::PlayerPersonalMarkers", "FCrPlayerPersonalMarkerData::MarkerPosition",
 		  "FCrPlayerPersonalMarkerData::PlayerName", "FCrPlayerPersonalMarkerData::PlayerColor",
@@ -114,7 +120,7 @@ namespace CompassFields
 	inline void DeclareFeatures(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		PluginMap::DeclareFeatures(scanner, self,
-			PlayerMarkers, BaseCoreMarkers, FoundableMarkers, EnemyMarkers, CustomPinMarkers);
+			PlayerMarkers, BaseCoreMarkers, FoundableMarkers, EnemyMarkers, CustomPinMarkers, ReleaseTextureRefs);
 	}
 
 	// Asks the loader for every row above. False when any did not resolve; the
