@@ -1,4 +1,3 @@
 - Compass now holds its icon textures with the engine's own reference count instead of hand-written flag writes, and draws nothing from a texture it no longer holds. This should stop the crashes some players saw when joining a server
 - On a client joined to a server, Compass no longer asks the game to refresh player markers itself; it shows the markers the server sends
-- The compass no longer goes missing for a moment after loading
 - Now loads on ModLoader v1.23.0 and newer

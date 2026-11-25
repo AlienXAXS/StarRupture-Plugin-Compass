@@ -1000,13 +1000,12 @@ namespace Compass
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 
 		// The engine's strong reference pair that keeps the icon textures alive.
-		// Both are global keys in the loader's map. AddRef keeps a pattern as the
-		// fallback for a build the map has no row for. ReleaseRef has none: the
-		// map is its only source, and without a row the textures stay held until
-		// the process exits (declared as a feature, so that miss does not refuse
-		// the plugin).
+		// Both are global keys in the loader's map and have no pattern of our own.
+		// Without an AddRef row the icons are off and the compass draws text markers;
+		// without a ReleaseRef row the references are held until the process exits.
+		// Each is declared as a feature, so that miss does not refuse the plugin.
 		g_addRefAddr = PluginMap::Function(scanner, self,
-			"UObject::AddRef", AobPatterns::UObject_AddRef,
+			"UObject::AddRef", nullptr,
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 		g_releaseRefAddr = PluginMap::Function(scanner, self,
 			"UObject::ReleaseRef", nullptr,
