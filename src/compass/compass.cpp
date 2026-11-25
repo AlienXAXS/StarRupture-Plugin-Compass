@@ -89,7 +89,7 @@ namespace Compass
 
 	static void RefreshConfig()
 	{
-		s_cfg.textOnly = CompassConfig::Config::IsTextOnly();
+		s_cfg.textOnly = CompassConfig::Config::IsTextOnly() || !CompassFields::IconTextures.On();
 		s_cfg.scale = CompassConfig::Config::GetScale();
 		s_cfg.posY = CompassConfig::Config::GetPosY();
 		s_cfg.widthFraction = CompassConfig::Config::GetWidthFraction();

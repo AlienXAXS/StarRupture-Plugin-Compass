@@ -3,6 +3,7 @@
 #include "Engine_classes.hpp"
 #include "object_ref.h"
 #include "plugin_helpers.h"
+#include "../compass_fields.h"
 
 #include <algorithm>
 #include <vector>
@@ -153,7 +154,7 @@ namespace Compass
 			LOG_WARN("[Compass] LoadAllTextures: StaticLoadObject not registered -- skipping");
 			return false;
 		}
-		if (!g_addRef)
+		if (!g_addRef || !CompassFields::IconTextures.On())
 			return false;
 
 		// Drop retained entries whose texture is gone, before anything is loaded:
