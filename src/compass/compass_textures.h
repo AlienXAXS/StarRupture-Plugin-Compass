@@ -4,6 +4,7 @@
 #include "object_ref.h"
 #include "plugin_helpers.h"
 
+#include <algorithm>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,10 @@ namespace Compass
 	// Every object we hold one reference on, once each.
 	static std::vector<ObjectRef<SDK::UTexture>> s_retained;
 
+	// The "N/9 loaded" line is written once per world: set again at each world
+	// begin, cleared when the line is written.
+	static bool s_summaryPending = true;
+
 	void SetStrongRefFunctions(uintptr_t addRef, uintptr_t releaseRef)
 	{
 		g_addRef = reinterpret_cast<RefFn>(addRef);
@@ -139,7 +144,7 @@ namespace Compass
 	// alone; only a slot whose texture is gone is loaded again.
 	//
 	// Returns true when every slot holds a live texture. logSummary: write the
-	// per-world "N/9 loaded" line.
+	// "N/9 loaded" line (once per world).
 	// ---------------------------------------------------------------------------
 	static bool LoadAllTextures(bool logSummary)
 	{
@@ -150,6 +155,14 @@ namespace Compass
 		}
 		if (!g_addRef)
 			return false;
+
+		// Drop retained entries whose texture is gone, before anything is loaded:
+		// a new texture can land on the same address and slot, and a stale entry
+		// would then match it and suppress its AddRef. Nothing is released here:
+		// a dead object has no reference of ours to give back.
+		s_retained.erase(std::remove_if(s_retained.begin(), s_retained.end(),
+		                                [](const ObjectRef<SDK::UTexture>& r) { return !r.Get(); }),
+		                 s_retained.end());
 
 		TexEntry entries[] = {
 			{s_tex.player,        L"/Game/Chimera/UI/Map/Markers/T_UI_player_mapIcon.T_UI_player_mapIcon"},
@@ -187,8 +200,9 @@ namespace Compass
 			++present;
 		}
 
-		if (logSummary || newRefs > 0)
+		if ((logSummary && s_summaryPending) || newRefs > 0)
 		{
+			s_summaryPending = false;
 			LOG_INFO(
 				"[Compass] LoadAllTextures: %d/9 loaded, %d new refs -- player=%p core=%p body=%p drone=%p antenna=%p abandonedBase=%p cave=%p obelisk=%p customPin=%p",
 				present, newRefs,

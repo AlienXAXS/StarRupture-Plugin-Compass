@@ -56,7 +56,7 @@ Found a bug? [Report it on GitHub](https://github.com/AlienXAXS/StarRupture-Plug
 | Compass not visible | Confirm `Enabled=1` is set in `Plugins\config\Compass.ini`. |
 | Plugin not loading | Check `modloader.log` in `Binaries\Win64\` for errors. |
 | Compass missing for a moment after loading, a resize or an alt-tab | Expected. Compass draws nothing until the game window's viewport has settled (about half a second), then resumes by itself. This keeps the game from crashing on the first frame after a load. |
-| Game crashed a little after joining a server | Fixed: Compass now keeps its icons loaded properly, so joining a server no longer crashes the game. If it still happens, attach your `ModLoader.log` to a bug report. |
+| Game crashed a little after joining a server | Compass now holds its icon textures with the engine's own reference count instead of hand-written flag writes, and draws nothing from a texture it no longer holds. This should stop the crashes some players saw when joining a server. If it still happens, attach your `ModLoader.log` to a bug report. |
 
 ---
 

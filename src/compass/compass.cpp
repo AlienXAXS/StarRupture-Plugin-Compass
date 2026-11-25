@@ -158,17 +158,17 @@ namespace Compass
 	static bool ShouldGatherPlayers(SDK::UWorld* world)
 	{
 		static SDK::UWorld* s_skipWorld = nullptr;
-		static EPluginNetMode s_skipMode = EPluginNetMode::Standalone;
 
 		const EPluginNetMode mode = (g_hooks && g_hooks->NetMode) ? g_hooks->NetMode->GetNetMode()
 		                                                         : EPluginNetMode::Unknown;
 		if (mode == EPluginNetMode::Standalone || mode == EPluginNetMode::ListenServer)
 			return true;
 
-		if (world != s_skipWorld || mode != s_skipMode)
+		// Unknown is transient early in a world; the line is written once per
+		// world, for the mode that settled.
+		if (mode != EPluginNetMode::Unknown && world != s_skipWorld)
 		{
 			s_skipWorld = world;
-			s_skipMode = mode;
 			LOG_INFO("[Compass] GatherPlayersData skipped: net mode %s",
 			         mode == EPluginNetMode::Client ? "Client"
 			         : mode == EPluginNetMode::DedicatedServer ? "DedicatedServer" : "Unknown");
@@ -357,11 +357,14 @@ namespace Compass
 		if (!s_cfg.textOnly && g_addRef)
 		{
 			s_texRetryAccum += deltaSeconds;
-			if (s_texRetryAccum >= 2.0f && s_texRetries < 3 && AnyTextureMissing())
+			if (s_texRetryAccum >= 2.0f)
 			{
 				s_texRetryAccum = 0.0f;
-				++s_texRetries;
-				LoadAllTextures(false);
+				if (s_texRetries < 3 && AnyTextureMissing())
+				{
+					++s_texRetries;
+					LoadAllTextures(false);
+				}
 			}
 		}
 
@@ -859,6 +862,7 @@ namespace Compass
 
 		LOG_INFO("[Compass] OnAnyWorldBeginPlay: '%s' -- loading textures", worldName);
 		s_texRetries = 0;
+		s_texRetryAccum = 0.0f;
 		LoadAllTextures(true);
 	}
 
@@ -898,6 +902,8 @@ namespace Compass
 		g_mapManuWorld = nullptr;
 
 		// The texture references persist across worlds; nothing to clear for them.
+		// The next world writes its own "N/9 loaded" line.
+		s_summaryPending = true;
 		RestartDrawSettle();
 
 		// Reset world tracking.
