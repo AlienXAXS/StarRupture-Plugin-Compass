@@ -1,1 +1,2 @@
+- No more crash after joining a server: Compass now keeps its icons loaded properly
 - The compass no longer goes missing for a moment after loading

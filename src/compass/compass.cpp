@@ -54,10 +54,10 @@ namespace Compass
 	{
 		switch (type)
 		{
-		case Layout::PoiType::Antena: return s_tex.antena;
-		case Layout::PoiType::AbandonedBase: return s_tex.abandonedBase;
-		case Layout::PoiType::Cave: return s_tex.cave;
-		case Layout::PoiType::Obelisk: return s_tex.obelisk;
+		case Layout::PoiType::Antena: return s_tex.antena.Get();
+		case Layout::PoiType::AbandonedBase: return s_tex.abandonedBase.Get();
+		case Layout::PoiType::Cave: return s_tex.cave.Get();
+		case Layout::PoiType::Obelisk: return s_tex.obelisk.Get();
 		default: return nullptr;
 		}
 	}
@@ -117,6 +117,8 @@ namespace Compass
 
 	static float s_scanAccum = 0.0f;
 	static float s_playerScanAccum = 0.0f;
+	static float s_texRetryAccum = 0.0f;
+	static int s_texRetries = 0; // reload attempts from OnTick; reset each world
 
 	// ---------------------------------------------------------------------------
 	// GatherPlayersData -- direct call to UCrMapManuSubsystem::GatherPlayersData
@@ -135,6 +137,10 @@ namespace Compass
 	// player markers fall back to the game's own once-per-tick refresh.
 	static uintptr_t g_gatherPlayersDataAddr = 0;
 
+	// Filled in by ResolvePatterns, handed to the texture cache by Install.
+	static uintptr_t g_addRefAddr = 0;
+	static uintptr_t g_releaseRefAddr = 0;
+
 	static bool CallGatherPlayersData(GatherPlayersData_t fn, void* subsystem)
 	{
 		__try
@@ -143,6 +149,31 @@ namespace Compass
 			return true;
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+	}
+
+	// GatherPlayersData fills the subsystem's marker data, which only the server
+	// may write: on a client the engine's authority checks fire and nothing is
+	// added, the replicated data is read as it is. Standalone and listen server
+	// only; Unknown (no actor yet) and a null NetMode skip as well.
+	static bool ShouldGatherPlayers(SDK::UWorld* world)
+	{
+		static SDK::UWorld* s_skipWorld = nullptr;
+		static EPluginNetMode s_skipMode = EPluginNetMode::Standalone;
+
+		const EPluginNetMode mode = (g_hooks && g_hooks->NetMode) ? g_hooks->NetMode->GetNetMode()
+		                                                         : EPluginNetMode::Unknown;
+		if (mode == EPluginNetMode::Standalone || mode == EPluginNetMode::ListenServer)
+			return true;
+
+		if (world != s_skipWorld || mode != s_skipMode)
+		{
+			s_skipWorld = world;
+			s_skipMode = mode;
+			LOG_INFO("[Compass] GatherPlayersData skipped: net mode %s",
+			         mode == EPluginNetMode::Client ? "Client"
+			         : mode == EPluginNetMode::DedicatedServer ? "DedicatedServer" : "Unknown");
+		}
+		return false;
 	}
 
 	static void* FindMapManuSubsystem(SDK::UWorld* world)
@@ -293,7 +324,7 @@ namespace Compass
 		{
 			s_playerScanAccum = 0.0f;
 
-			if (g_gatherPlayersDataFn)
+			if (g_gatherPlayersDataFn && ShouldGatherPlayers(world))
 			{
 				if (world != g_mapManuWorld)
 				{
@@ -321,6 +352,19 @@ namespace Compass
 			}
 		}
 
+		// A texture that is gone (never expected with the strong reference held)
+		// is loaded again here, on the game thread; the draw path only skips it.
+		if (!s_cfg.textOnly && g_addRef)
+		{
+			s_texRetryAccum += deltaSeconds;
+			if (s_texRetryAccum >= 2.0f && s_texRetries < 3 && AnyTextureMissing())
+			{
+				s_texRetryAccum = 0.0f;
+				++s_texRetries;
+				LoadAllTextures(false);
+			}
+		}
+
 		// Full entity scan (slow interval).
 		s_scanAccum += deltaSeconds;
 		const float scanInterval = s_cfg.entityScanInterval / 60.0f;
@@ -338,8 +382,6 @@ namespace Compass
 	static void DrawCompass(SDK::AHUD* hud, SDK::UCanvas* canvas, SDK::UWorld* world)
 	{
 		const bool textOnly = s_cfg.textOnly;
-		if (!textOnly)
-			EnsureTextures(world);
 
 		SDK::APlayerController* pc = hud->GetOwningPlayerController();
 		if (!pc)
@@ -471,7 +513,7 @@ namespace Compass
 
 			hud->DrawLine(screenX, posY + 4.0f * scale, screenX, posY + 10.0f * scale, colour, 1.5f * scale);
 
-			if (!textOnly && tex && IsValidTexture(tex))
+			if (!textOnly && tex)
 			{
 				const float iconSize = 22.0f * scale;
 				SDK::FLinearColor tint{1.0f, 1.0f, 1.0f, finalAlpha};
@@ -508,7 +550,7 @@ namespace Compass
 
 			const float iconSize = 22.0f * scale;
 
-			const bool showIcon = !textOnly && tex && IsValidTexture(tex);
+			const bool showIcon = !textOnly && tex;
 			if (showIcon)
 			{
 				SDK::FLinearColor tint{1.0f, 1.0f, 1.0f, finalAlpha};
@@ -617,7 +659,7 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), cfgPlayers.distance);
 				if (alpha <= 0.0f) continue;
-				PushLabel(distSq, ToScreenX(p.location), s_tex.player, p.playerName.c_str(), colPlayer, alpha);
+				PushLabel(distSq, ToScreenX(p.location), s_tex.player.Get(), p.playerName.c_str(), colPlayer, alpha);
 			}
 		}
 		if (cfgCores.enabled)
@@ -628,7 +670,7 @@ namespace Compass
 				const float distSq = dx * dx + dy * dy;
 				const float alpha = DistAlpha(sqrtf(distSq), cfgCores.distance);
 				if (alpha <= 0.0f) continue;
-				PushLabel(distSq, ToScreenX(c.location), s_tex.baseCore, c.name.c_str(), colCore, alpha);
+				PushLabel(distSq, ToScreenX(c.location), s_tex.baseCore.Get(), c.name.c_str(), colCore, alpha);
 			}
 		}
 		// ForgottenEngine and OrbitalLander are filtered out in ScanMarkers.
@@ -660,9 +702,9 @@ namespace Compass
 				const float alpha = DistAlpha(sqrtf(distSq), maxDist);
 				if (alpha <= 0.0f) continue;
 				if (isBody)
-					PushIcon(distSq, ToScreenX(f.location), s_tex.body, L"D", colBody, alpha);
+					PushIcon(distSq, ToScreenX(f.location), s_tex.body.Get(), L"D", colBody, alpha);
 				else
-					PushIcon(distSq, ToScreenX(f.location), s_tex.drone, L"Dr", colDrone, alpha);
+					PushIcon(distSq, ToScreenX(f.location), s_tex.drone.Get(), L"Dr", colDrone, alpha);
 			}
 		}
 		// --- Personal map pins (ACrGameStateBase::PlayerPersonalMarkers) ---
@@ -679,7 +721,7 @@ namespace Compass
 					pin.color.A > 0.0f ? pin.color.A : 1.0f
 				};
 				const wchar_t* lbl = pin.playerName.empty() ? L"Pin" : pin.playerName.c_str();
-				PushLabel(distSq, ToScreenX(pin.location), s_tex.customPin, lbl, col, alpha);
+				PushLabel(distSq, ToScreenX(pin.location), s_tex.customPin.Get(), lbl, col, alpha);
 			}
 		}
 
@@ -800,8 +842,7 @@ namespace Compass
 	{
 		RestartDrawSettle();
 		LOG_INFO("[Compass] OnExperienceLoadComplete: loading textures");
-		SDK::UWorld* world = PluginSdkRuntime::GetWorld();
-		LoadAllTextures(world);
+		LoadAllTextures(true);
 	}
 
 	// ---------------------------------------------------------------------------
@@ -817,7 +858,8 @@ namespace Compass
 		RestartDrawSettle();
 
 		LOG_INFO("[Compass] OnAnyWorldBeginPlay: '%s' -- loading textures", worldName);
-		LoadAllTextures(world);
+		s_texRetries = 0;
+		LoadAllTextures(true);
 	}
 
 	// Hot-load seed: the plugin installed after ChimeraMain began, so
@@ -833,7 +875,7 @@ namespace Compass
 			if (!currentWorld) return;
 
 			s_isChimeraMain = true;
-			LoadAllTextures(currentWorld);
+			LoadAllTextures(true);
 			LOG_INFO("[Compass] Install: already in ChimeraMain -- s_isChimeraMain set");
 		}
 		catch (...) {}
@@ -855,10 +897,7 @@ namespace Compass
 		g_mapManuSubsystem = nullptr;
 		g_mapManuWorld = nullptr;
 
-		// Clear texture slots -- they will be reloaded fresh in OnExperienceLoadComplete
-		// or OnAnyWorldBeginPlay for the new world.  Nulling them here prevents DrawCompass
-		// from drawing with stale pointers during the world teardown/transition gap.
-		ClearTextures();
+		// The texture references persist across worlds; nothing to clear for them.
 		RestartDrawSettle();
 
 		// Reset world tracking.
@@ -953,6 +992,16 @@ namespace Compass
 			"UCrMapManuSubsystem::GatherPlayersData",
 			AobPatterns::UCrMapManuSubsystem_GatherPlayersData,
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
+
+		// The engine's strong reference pair that keeps the icon textures alive.
+		// Both are global keys in the loader's map; the patterns are the fallback
+		// for a loader whose map has no row for the running build.
+		g_addRefAddr = PluginMap::Function(scanner, self,
+			"UObject::AddRef", AobPatterns::UObject_AddRef,
+			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
+		g_releaseRefAddr = PluginMap::Function(scanner, self,
+			"UObject::ReleaseRef", AobPatterns::UObject_ReleaseRef,
+			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 	}
 
 	bool Install(IPluginSelf* self)
@@ -979,6 +1028,8 @@ namespace Compass
 
 		g_self  = self;
 		g_hooks = hooks;
+
+		SetStrongRefFunctions(g_addRefAddr, g_releaseRefAddr);
 
 		// GatherPlayersData comes from our own scan back in OnPluginLoadHooks, not
 		// from the modloader's cache -- see aob_patterns.h for why.
@@ -1066,6 +1117,10 @@ namespace Compass
 
 		if (g_hooks && g_hooks->GameMenu)
 			g_hooks->GameMenu->UnregisterOnUIStateChanged(OnUIStateChanged, nullptr);
+
+		// Give the texture references back, on the game thread only. Shutdown also
+		// runs at process exit, off it, where the references are left alone.
+		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread());
 
 		g_hooks        = nullptr;
 		g_self         = nullptr;
