@@ -106,9 +106,10 @@ namespace CompassFields
 	// UObject::AddRef holds the icon textures with the engine's own reference. It is
 	// a map key with no pattern of our own, so it is declared here: on a build the
 	// map has no row for, the icons are off and the compass draws text markers.
-	// This and the next feature only catch that miss. Nothing reads their On():
-	// the null address is what turns each off, and the references are what keep
-	// the icons safe to draw.
+	// While this is off the markers are drawn as text. Loading and releasing
+	// ignore this flag and the next feature's: a miss leaves a null address, which
+	// is what turns each off there, and the references are what keep the icons
+	// safe.
 	inline PluginMap::Feature IconTextures{ "icon-textures", "Compass icon textures",
 		{ "UObject::AddRef" }, {} };
 	// UObject::ReleaseRef gives back the references the icon textures hold. It is a

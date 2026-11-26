@@ -7,6 +7,7 @@
 #include "Engine_classes.hpp"
 #include "ChimeraUI_classes.hpp"
 #include "../layout/layout.h"
+#include "object_ref.h"
 
 #include <algorithm>
 #include <atomic>
@@ -130,8 +131,7 @@ namespace Compass
 
 	using GatherPlayersData_t = void(__fastcall*)(void* thisSubsystem);
 	static GatherPlayersData_t g_gatherPlayersDataFn = nullptr;
-	static void* g_mapManuSubsystem = nullptr;
-	static SDK::UWorld* g_mapManuWorld = nullptr;
+	static ObjectRef<SDK::UObject> g_mapManuSubsystem;
 
 	// Filled in by ResolvePatterns; 0 means the pattern missed on this build and
 	// player markers fall back to the game's own once-per-tick refresh.
@@ -176,7 +176,7 @@ namespace Compass
 		return false;
 	}
 
-	static void* FindMapManuSubsystem(SDK::UWorld* world)
+	static SDK::UObject* FindMapManuSubsystem(SDK::UWorld* world)
 	{
 		SDK::TUObjectArray* arr = SDK::UObject::GObjects.GetTypedPtr();
 		if (!arr) return nullptr;
@@ -214,6 +214,14 @@ namespace Compass
 	static void RefreshEntities(SDK::UWorld* world)
 	{
 		LOG_TRACE("[Compass] RefreshEntities: world=%p", static_cast<void*>(world));
+
+		const bool wantsMapData = CompassFields::PlayerMarkers.On() || CompassFields::BaseCoreMarkers.On()
+			|| CompassFields::FoundableMarkers.On();
+		if (wantsMapData)
+		{
+			try { Layout::EnsureMapHelper(world); }
+			catch (...) { LOG_WARN("[Compass] Exception in EnsureMapHelper -- ignored"); }
+		}
 
 		LOG_TRACE("[Compass] >> ScanBaseCores...");
 		if (CompassFields::BaseCoreMarkers.On())
@@ -300,8 +308,7 @@ namespace Compass
 		// before our next PostRender) sees the flag and refreshes its data in time
 		// for our next scan. Setting it before the reads would only affect the tick
 		// AFTER this frame anyway, making it equivalent but less clear in intent.
-		if (!(CompassFields::PlayerMarkers.On() || CompassFields::BaseCoreMarkers.On()
-			|| CompassFields::FoundableMarkers.On()))
+		if (!wantsMapData)
 			return;
 		SDK::APlayerController* localPC = SDK::UGameplayStatics::GetPlayerController(world, 0);
 		uint8_t* mapMenuOpen = CompassFields::MapMenuOpen.In(localPC);
@@ -353,8 +360,7 @@ namespace Compass
 		s_playerMarkers.clear();
 		s_customPins.clear();
 
-		g_mapManuSubsystem = nullptr;
-		g_mapManuWorld = nullptr;
+		g_mapManuSubsystem.Reset();
 
 		// Scan on the next tick.
 		s_scanAccum = 9999.0f;
@@ -374,25 +380,38 @@ namespace Compass
 		s_setMapMenuOpen = false;
 	}
 
+	// The live gameplay world, or null outside gameplay, where there is nothing
+	// in the world to put back. False when it cannot be read right now.
+	static bool GameplayWorld(SDK::UWorld*& world)
+	{
+		world = nullptr;
+		if (!s_isChimeraMain)
+			return true;
+		try { world = PluginSdkRuntime::GetWorld(); }
+		catch (...) { return false; }
+		return world != nullptr;
+	}
+
+	// Takes back what the compass changed in the game to get the map data.
+	// world is null outside gameplay. Game thread only.
+	static void ReleaseMapData(SDK::UWorld* world)
+	{
+		RestoreMapMenuOpen(world);
+		Layout::RemoveStandInHelper(world);
+	}
+
 	static void SyncFeatures()
 	{
 		const unsigned active = ActiveFeatures();
 		if (active == s_activeFeatures)
 			return;
 
-		// Null outside gameplay, where there is nothing in the world to put back.
 		SDK::UWorld* world = nullptr;
-		if (s_isChimeraMain)
-		{
-			try { world = PluginSdkRuntime::GetWorld(); }
-			catch (...) { return; }
-			if (!world) return;
-		}
+		if (!GameplayWorld(world))
+			return;
 
 		if (!(active & kMapData))
-			RestoreMapMenuOpen(world);
-		if (!(active & kBaseCores))
-			Layout::RemoveStandInHelper(world);
+			ReleaseMapData(world);
 		ClearEntityCaches();
 
 		const bool wasOff = !(s_activeFeatures & kCompass);
@@ -440,21 +459,17 @@ namespace Compass
 
 			if (g_gatherPlayersDataFn && ShouldGatherPlayers(world))
 			{
-				if (world != g_mapManuWorld)
+				SDK::UObject* subsystem = g_mapManuSubsystem.Get();
+				if (!subsystem || subsystem->Outer != static_cast<SDK::UObject*>(world))
 				{
-					g_mapManuSubsystem = nullptr;
-					g_mapManuWorld = world;
+					subsystem = FindMapManuSubsystem(world);
+					g_mapManuSubsystem.Set(subsystem);
 				}
-				if (!g_mapManuSubsystem)
-					g_mapManuSubsystem = FindMapManuSubsystem(world);
 
-				if (g_mapManuSubsystem)
+				if (subsystem && !CallGatherPlayersData(g_gatherPlayersDataFn, subsystem))
 				{
-					if (!CallGatherPlayersData(g_gatherPlayersDataFn, g_mapManuSubsystem))
-					{
-						LOG_WARN("[Compass] Exception in GatherPlayersData -- resetting subsystem cache");
-						g_mapManuSubsystem = nullptr;
-					}
+					LOG_WARN("[Compass] Exception in GatherPlayersData -- resetting subsystem cache");
+					g_mapManuSubsystem.Reset();
 				}
 			}
 
@@ -498,7 +513,7 @@ namespace Compass
 
 	static void DrawCompass(SDK::AHUD* hud, SDK::UCanvas* canvas, SDK::UWorld* world)
 	{
-		const bool textOnly = s_cfg.textOnly;
+		const bool textOnly = s_cfg.textOnly || !CompassFields::IconTextures.On();
 
 		SDK::APlayerController* pc = hud->GetOwningPlayerController();
 		if (!pc)
@@ -1241,9 +1256,15 @@ namespace Compass
 			g_hooks->GameMenu->UnregisterOnUIStateChanged(OnMapStateChanged, nullptr);
 		}
 
-		// Give the texture references back, on the game thread only. Shutdown also
-		// runs at process exit, off it, where the references are left alone.
-		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread());
+		// Put the game back and give the texture references back, on the game
+		// thread only. Shutdown also runs at process exit, off it, where both are
+		// left alone.
+		const bool onGameThread = hooks && hooks->Engine && hooks->Engine->IsGameThread
+			&& hooks->Engine->IsGameThread();
+		SDK::UWorld* world = nullptr;
+		if (onGameThread && GameplayWorld(world))
+			ReleaseMapData(world);
+		ReleaseTextures(onGameThread);
 
 		g_hooks        = nullptr;
 		g_self         = nullptr;

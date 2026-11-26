@@ -24,6 +24,70 @@ namespace Layout
 		std::wstring name;
 	};
 
+	// Spawns a stand-in helper into the game state when the game's own has not
+	// arrived. Players, base cores and foundables all read it. Game thread only.
+	inline void EnsureMapHelper(SDK::UWorld* world)
+	{
+		if (!world)
+			return;
+
+		LOG_TRACE("[EnsureMapHelper] spawnAttempted=%d standInHelper=%p",
+		          static_cast<int>(s_helperSpawnAttempted), static_cast<void*>(s_standInHelper.Get()));
+
+		auto* gameState = world->GameState
+			                  ? static_cast<SDK::ACrGameStateBase*>(world->GameState)
+			                  : nullptr;
+		LOG_TRACE("[EnsureMapHelper] gameState=%p", static_cast<void*>(gameState));
+
+		auto* mapHelper = CompassFields::MapHelperOf(gameState);
+		LOG_TRACE("[EnsureMapHelper] mapHelper=%p (from GameState)", static_cast<void*>(mapHelper));
+
+		// Spawn a local helper if the real one hasn't arrived yet.
+		if (!mapHelper && !s_helperSpawnAttempted && gameState)
+		{
+			s_helperSpawnAttempted = true;
+			LOG_TRACE("[EnsureMapHelper] MapMenuDataReplicationHelper absent — spawning local stand-in");
+
+			SDK::FTransform transform{};
+			transform.Rotation.W = 1.0f; // identity quaternion
+			transform.Scale3D = {1.0f, 1.0f, 1.0f};
+
+			SDK::AActor* spawned = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
+				world,
+				SDK::ACrMapMenuDataReplicationHelper::StaticClass(),
+				transform,
+				SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn,
+				nullptr,
+				SDK::ESpawnActorScaleMethod::OverrideRootScale);
+
+			LOG_TRACE("[EnsureMapHelper] BeginDeferredActorSpawnFromClass returned %p", static_cast<void*>(spawned));
+
+			if (spawned)
+			{
+				SDK::UGameplayStatics::FinishSpawningActor(spawned, transform,
+				                                           SDK::ESpawnActorScaleMethod::OverrideRootScale);
+				auto* standIn = static_cast<SDK::ACrMapMenuDataReplicationHelper*>(spawned);
+				s_standInHelper.Set(standIn);
+				if (auto* helperSlot = CompassFields::MapMenuHelper.In(gameState))
+					*helperSlot = standIn;
+				LOG_TRACE("[EnsureMapHelper] Spawned local helper %p — UCrMapManuSubsystem will populate it next tick",
+				          static_cast<void*>(standIn));
+			}
+			else
+			{
+				LOG_WARN("[EnsureMapHelper] BeginDeferredActorSpawnFromClass returned null — distant cores unavailable");
+			}
+		}
+		else if (!mapHelper && s_helperSpawnAttempted)
+		{
+			LOG_TRACE("[EnsureMapHelper] Spawn already attempted but mapHelper still null (waiting for first tick)");
+		}
+		else if (!mapHelper && !gameState)
+		{
+			LOG_TRACE("[EnsureMapHelper] No gameState — cannot spawn helper yet");
+		}
+	}
+
 	// Returns all ACrBaseCore actors in the level, with custom names resolved.
 	inline std::vector<BaseCoreEntry> ScanBaseCores(SDK::UWorld* world)
 	{
@@ -106,8 +170,8 @@ namespace Layout
 		// The flag is normally only set when the player opens the map UI.
 		// We force byte+3816=1 on the local PC whenever bmd is empty so the
 		// subsystem populates BuildingsMarkerDataContainer without any player action.
-		// The fake-helper spawn path below is a backstop for the rare case where
-		// the helper pointer itself is absent.
+		// EnsureMapHelper is a backstop for the rare case where the helper pointer
+		// itself is absent.
 		//
 		// All statics are cleared on world change.
 		// Location is FVector2f (X,Y only); Z is set to 0 for unloaded actors.
@@ -116,62 +180,10 @@ namespace Layout
 		// Persistent cache of distant core locations (survives empty bmd scans).
 		// Reset via ResetBaseCoreState() on world end play.
 
-		LOG_TRACE("[ScanBaseCores] spawnAttempted=%d standInHelper=%p",
-		          static_cast<int>(s_helperSpawnAttempted), static_cast<void*>(s_standInHelper.Get()));
-
 		auto* gameState = world->GameState
 			                  ? static_cast<SDK::ACrGameStateBase*>(world->GameState)
 			                  : nullptr;
-		LOG_TRACE("[ScanBaseCores] gameState=%p", static_cast<void*>(gameState));
-
 		auto* mapHelper = CompassFields::MapHelperOf(gameState);
-		LOG_TRACE("[ScanBaseCores] mapHelper=%p (from GameState)", static_cast<void*>(mapHelper));
-
-		// Spawn a local helper if the real one hasn't arrived yet.
-		if (!mapHelper && !s_helperSpawnAttempted && gameState)
-		{
-			s_helperSpawnAttempted = true;
-			LOG_TRACE("[ScanBaseCores] MapMenuDataReplicationHelper absent — spawning local stand-in");
-
-			SDK::FTransform transform{};
-			transform.Rotation.W = 1.0f; // identity quaternion
-			transform.Scale3D = {1.0f, 1.0f, 1.0f};
-
-			SDK::AActor* spawned = SDK::UGameplayStatics::BeginDeferredActorSpawnFromClass(
-				world,
-				SDK::ACrMapMenuDataReplicationHelper::StaticClass(),
-				transform,
-				SDK::ESpawnActorCollisionHandlingMethod::AlwaysSpawn,
-				nullptr,
-				SDK::ESpawnActorScaleMethod::OverrideRootScale);
-
-			LOG_TRACE("[ScanBaseCores] BeginDeferredActorSpawnFromClass returned %p", static_cast<void*>(spawned));
-
-			if (spawned)
-			{
-				SDK::UGameplayStatics::FinishSpawningActor(spawned, transform,
-				                                           SDK::ESpawnActorScaleMethod::OverrideRootScale);
-				auto* standIn = static_cast<SDK::ACrMapMenuDataReplicationHelper*>(spawned);
-				s_standInHelper.Set(standIn);
-				if (auto* helperSlot = CompassFields::MapMenuHelper.In(gameState))
-					*helperSlot = standIn;
-				mapHelper = standIn;
-				LOG_TRACE("[ScanBaseCores] Spawned local helper %p — UCrMapManuSubsystem will populate it next tick",
-				          static_cast<void*>(standIn));
-			}
-			else
-			{
-				LOG_WARN("[ScanBaseCores] BeginDeferredActorSpawnFromClass returned null — distant cores unavailable");
-			}
-		}
-		else if (!mapHelper && s_helperSpawnAttempted)
-		{
-			LOG_TRACE("[ScanBaseCores] Spawn already attempted but mapHelper still null (waiting for first tick)");
-		}
-		else if (!mapHelper && !gameState)
-		{
-			LOG_TRACE("[ScanBaseCores] No gameState — cannot spawn helper yet");
-		}
 
 		const auto* bmdArray = CompassFields::ArrayIn(CompassFields::BuildingsContainer, CompassFields::BuildingsData, mapHelper);
 		if (mapHelper && bmdArray)

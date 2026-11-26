@@ -19,8 +19,8 @@ namespace Layout
 	};
 
 	// Returns all player-placed map markers replicated via ACrMapMenuDataReplicationHelper.
-	// Must be called after ScanBaseCores so the helper is guaranteed non-null in GameState
-	// (either the real replicated actor or the local stand-in we spawn on first scan).
+	// EnsureMapHelper must have run for a helper to be in GameState
+	// (either the real replicated actor or the local stand-in).
 	inline std::vector<PlayerMarkerEntry> ScanPlayerMarkers(SDK::UWorld* world)
 	{
 		std::vector<PlayerMarkerEntry> result;
