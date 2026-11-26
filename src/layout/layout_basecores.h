@@ -4,6 +4,7 @@
 #include <string>
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
+#include "object_ref.h"
 #include "../plugin_helpers.h"
 #include "../compass_fields.h"
 
@@ -12,7 +13,7 @@ namespace Layout
 	// Namespace-scope so ResetBaseCoreState() can reach them.
 	inline std::vector<SDK::FVector> s_distantCoreCache;
 	inline bool s_helperSpawnAttempted = false;
-	inline SDK::ACrMapMenuDataReplicationHelper* s_fakeHelper = nullptr;
+	inline ObjectRef<SDK::ACrMapMenuDataReplicationHelper> s_standInHelper;
 
 	struct BaseCoreEntry
 	{
@@ -115,8 +116,8 @@ namespace Layout
 		// Persistent cache of distant core locations (survives empty bmd scans).
 		// Reset via ResetBaseCoreState() on world end play.
 
-		LOG_TRACE("[ScanBaseCores] spawnAttempted=%d fakeHelper=%p",
-		          static_cast<int>(s_helperSpawnAttempted), static_cast<void*>(s_fakeHelper));
+		LOG_TRACE("[ScanBaseCores] spawnAttempted=%d standInHelper=%p",
+		          static_cast<int>(s_helperSpawnAttempted), static_cast<void*>(s_standInHelper.Get()));
 
 		auto* gameState = world->GameState
 			                  ? static_cast<SDK::ACrGameStateBase*>(world->GameState)
@@ -150,12 +151,13 @@ namespace Layout
 			{
 				SDK::UGameplayStatics::FinishSpawningActor(spawned, transform,
 				                                           SDK::ESpawnActorScaleMethod::OverrideRootScale);
-				s_fakeHelper = static_cast<SDK::ACrMapMenuDataReplicationHelper*>(spawned);
+				auto* standIn = static_cast<SDK::ACrMapMenuDataReplicationHelper*>(spawned);
+				s_standInHelper.Set(standIn);
 				if (auto* helperSlot = CompassFields::MapMenuHelper.In(gameState))
-					*helperSlot = s_fakeHelper;
-				mapHelper = s_fakeHelper;
+					*helperSlot = standIn;
+				mapHelper = standIn;
 				LOG_TRACE("[ScanBaseCores] Spawned local helper %p — UCrMapManuSubsystem will populate it next tick",
-				          static_cast<void*>(s_fakeHelper));
+				          static_cast<void*>(standIn));
 			}
 			else
 			{
@@ -247,6 +249,25 @@ namespace Layout
 		LOG_TRACE("[ScanBaseCores] ResetBaseCoreState — clearing distant-core statics");
 		s_distantCoreCache.clear();
 		s_helperSpawnAttempted = false;
-		s_fakeHelper = nullptr;
+		s_standInHelper.Reset();
+	}
+
+	// Takes back the stand-in helper: empties the game state's slot if it still
+	// holds ours, destroys the actor and resets the statics. world is null when
+	// there is no live gameplay world. Game thread only.
+	inline void RemoveStandInHelper(SDK::UWorld* world)
+	{
+		auto* helper = s_standInHelper.Get();
+		if (world && helper)
+		{
+			auto* gameState = world->GameState
+				                  ? static_cast<SDK::ACrGameStateBase*>(world->GameState)
+				                  : nullptr;
+			auto* helperSlot = CompassFields::MapMenuHelper.In(gameState);
+			if (helperSlot && *helperSlot == helper)
+				*helperSlot = nullptr;
+			helper->K2_DestroyActor();
+		}
+		ResetBaseCoreState();
 	}
 } // namespace Layout

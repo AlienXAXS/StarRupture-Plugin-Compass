@@ -154,7 +154,7 @@ namespace Compass
 			LOG_WARN("[Compass] LoadAllTextures: StaticLoadObject not registered -- skipping");
 			return false;
 		}
-		if (!g_addRef || !CompassFields::IconTextures.On())
+		if (!g_addRef || !CompassFields::WholeCompass.On())
 			return false;
 
 		// Drop retained entries whose texture is gone, before anything is loaded:
@@ -231,21 +231,19 @@ namespace Compass
 	}
 
 	// ---------------------------------------------------------------------------
-	// ReleaseTextures -- gives back every reference taken, at plugin shutdown.
-	// Game thread only: off it (process exit) the references are left alone, as
-	// they are when the texture-release feature is off.
+	// ReleaseTextures -- gives back every reference taken, at plugin shutdown and
+	// when the whole compass is switched off. Game thread only: off it (process
+	// exit) the references are left alone, as they are without ReleaseRef.
 	// ---------------------------------------------------------------------------
-	static void ReleaseTextures(bool onGameThread, bool featureOn)
+	static void ReleaseTextures(bool onGameThread)
 	{
 		if (s_retained.empty())
 			return;
 
-		if (!g_releaseRef || !featureOn || !onGameThread)
+		if (!g_releaseRef || !onGameThread)
 		{
 			LOG_INFO("[Compass] Texture refs not released (%s)",
-			         !g_releaseRef ? "ReleaseRef unavailable"
-			         : !featureOn  ? "texture-release is off"
-			                       : "not on the game thread");
+			         !g_releaseRef ? "ReleaseRef unavailable" : "not on the game thread");
 			s_retained.clear();
 			s_tex = {};
 			return;

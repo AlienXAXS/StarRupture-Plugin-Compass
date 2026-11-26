@@ -89,7 +89,7 @@ namespace Compass
 
 	static void RefreshConfig()
 	{
-		s_cfg.textOnly = CompassConfig::Config::IsTextOnly() || !CompassFields::IconTextures.On();
+		s_cfg.textOnly = CompassConfig::Config::IsTextOnly() || !g_addRef;
 		s_cfg.scale = CompassConfig::Config::GetScale();
 		s_cfg.posY = CompassConfig::Config::GetPosY();
 		s_cfg.widthFraction = CompassConfig::Config::GetWidthFraction();
@@ -208,6 +208,8 @@ namespace Compass
 	static std::vector<Layout::PlayerMarkerEntry> s_playerMarkers;
 	static std::vector<Layout::CustomPinEntry> s_customPins;
 	static bool s_isChimeraMain = false; // set by OnAnyWorldBeginPlay, cleared by OnBeforeWorldEndPlay
+	static bool s_setMapMenuOpen = false; // bMapMenuOpen was clear and the compass set it, this world
+	static bool s_mapOpen = false;        // the game's map is on screen
 
 	static void RefreshEntities(SDK::UWorld* world)
 	{
@@ -298,9 +300,119 @@ namespace Compass
 		// before our next PostRender) sees the flag and refreshes its data in time
 		// for our next scan. Setting it before the reads would only affect the tick
 		// AFTER this frame anyway, making it equivalent but less clear in intent.
+		if (!(CompassFields::PlayerMarkers.On() || CompassFields::BaseCoreMarkers.On()
+			|| CompassFields::FoundableMarkers.On()))
+			return;
 		SDK::APlayerController* localPC = SDK::UGameplayStatics::GetPlayerController(world, 0);
-		if (uint8_t* mapMenuOpen = CompassFields::MapMenuOpen.In(localPC))
+		uint8_t* mapMenuOpen = CompassFields::MapMenuOpen.In(localPC);
+		if (mapMenuOpen && !*mapMenuOpen)
+		{
 			*mapMenuOpen = 1;
+			s_setMapMenuOpen = true;
+		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Features switched while running -- the loader can turn any of them off or
+	// back on at any time, so the tick compares and puts things in order.
+	// ---------------------------------------------------------------------------
+
+	enum : unsigned
+	{
+		kCompass    = 1u << 0,
+		kPlayers    = 1u << 1,
+		kBaseCores  = 1u << 2,
+		kFoundables = 1u << 3,
+		kEnemies    = 1u << 4,
+		kCustomPins = 1u << 5,
+		kMapData    = kPlayers | kBaseCores | kFoundables, // the ones that set bMapMenuOpen
+		kEverything = (1u << 6) - 1,
+	};
+
+	static unsigned s_activeFeatures = kEverything;
+
+	// What is running now; nothing while the whole compass is off.
+	static unsigned ActiveFeatures()
+	{
+		if (!CompassFields::WholeCompass.On())
+			return 0;
+		return kCompass
+			| (CompassFields::PlayerMarkers.On() ? kPlayers : 0u)
+			| (CompassFields::BaseCoreMarkers.On() ? kBaseCores : 0u)
+			| (CompassFields::FoundableMarkers.On() ? kFoundables : 0u)
+			| (CompassFields::EnemyMarkers.On() ? kEnemies : 0u)
+			| (CompassFields::CustomPinMarkers.On() ? kCustomPins : 0u);
+	}
+
+	static void ClearEntityCaches()
+	{
+		s_cores.clear();
+		s_markers.clear();
+		s_foundables.clear();
+		s_enemies.clear();
+		s_playerMarkers.clear();
+		s_customPins.clear();
+
+		g_mapManuSubsystem = nullptr;
+		g_mapManuWorld = nullptr;
+
+		// Scan on the next tick.
+		s_scanAccum = 9999.0f;
+		s_playerScanAccum = 9999.0f;
+	}
+
+	// Clears bMapMenuOpen again if the compass set it. With the map on screen the
+	// flag is the game's.
+	static void RestoreMapMenuOpen(SDK::UWorld* world)
+	{
+		if (s_setMapMenuOpen && !s_mapOpen && world)
+		{
+			SDK::APlayerController* localPC = SDK::UGameplayStatics::GetPlayerController(world, 0);
+			if (uint8_t* mapMenuOpen = CompassFields::MapMenuOpen.In(localPC))
+				*mapMenuOpen = 0;
+		}
+		s_setMapMenuOpen = false;
+	}
+
+	static void SyncFeatures()
+	{
+		const unsigned active = ActiveFeatures();
+		if (active == s_activeFeatures)
+			return;
+
+		// Null outside gameplay, where there is nothing in the world to put back.
+		SDK::UWorld* world = nullptr;
+		if (s_isChimeraMain)
+		{
+			try { world = PluginSdkRuntime::GetWorld(); }
+			catch (...) { return; }
+			if (!world) return;
+		}
+
+		if (!(active & kMapData))
+			RestoreMapMenuOpen(world);
+		if (!(active & kBaseCores))
+			Layout::RemoveStandInHelper(world);
+		ClearEntityCaches();
+
+		const bool wasOff = !(s_activeFeatures & kCompass);
+		s_activeFeatures = active;
+
+		if (!(active & kCompass))
+		{
+			// Without ReleaseRef the textures stay held and are used again.
+			if (g_releaseRef)
+				ReleaseTextures(true);
+			return;
+		}
+
+		RefreshConfig();
+		if (wasOff && s_isChimeraMain)
+		{
+			s_texRetries = 0;
+			s_texRetryAccum = 0.0f;
+			LoadAllTextures(true);
+		}
 	}
 
 	// ---------------------------------------------------------------------------
@@ -310,6 +422,8 @@ namespace Compass
 
 	static void OnTick(float deltaSeconds)
 	{
+		SyncFeatures();
+		if (!CompassFields::WholeCompass.On()) return;
 		if (!s_isChimeraMain) return;
 
 		SDK::UWorld* world = nullptr;
@@ -885,21 +999,19 @@ namespace Compass
 		catch (...) {}
 	}
 
+	static void OnMapStateChanged(uint64_t /*oldState*/, uint64_t newState, void* /*userData*/)
+	{
+		s_mapOpen = (newState & PLUGIN_UI_MAP) != 0;
+	}
+
 	static void OnBeforeWorldEndPlay(SDK::UWorld* /*world*/, const char* worldName)
 	{
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: '%s' — clearing all caches and stale pointers", worldName);
 
-		// Clear entity caches so they aren't accessed with stale data on the next world.
-		s_cores.clear();
-		s_markers.clear();
-		s_foundables.clear();
-		s_enemies.clear();
-		s_playerMarkers.clear();
-		s_customPins.clear();
-
-		// Reset subsystem pointers — the CrMapManuSubsystem is being destroyed with the world.
-		g_mapManuSubsystem = nullptr;
-		g_mapManuWorld = nullptr;
+		// The entity caches and the subsystem pointer go with the world, so neither
+		// is used on the next one, and the scans fire immediately there.
+		ClearEntityCaches();
+		s_setMapMenuOpen = false;
 
 		// The texture references persist across worlds; nothing to clear for them.
 		// The next world writes its own "N/9 loaded" line.
@@ -908,10 +1020,6 @@ namespace Compass
 
 		// Reset world tracking.
 		s_isChimeraMain = false;
-
-		// Reset scan throttle accumulators so scans fire immediately in the new world.
-		s_scanAccum = 9999.0f;
-		s_playerScanAccum = 9999.0f;
 
 		// Notify layout scanners to force reset their internal statics on next call,
 		// even if the new world reuses the same pointer address as this one.
@@ -944,6 +1052,7 @@ namespace Compass
 	static void OnHUDPostRender(void* hudPtr)
 	{
 		if (!CompassConfig::Config::IsEnabled()) return;
+		if (!CompassFields::WholeCompass.On()) return;
 		if (!s_isChimeraMain) return;
 
 		SDK::AHUD* hud = static_cast<SDK::AHUD*>(hudPtr);
@@ -1087,7 +1196,10 @@ namespace Compass
 		// Hot-load seed: if we're already in ChimeraMain when the plugin installs,
 		// OnUIStateChanged sets the flag on the loader's next tick.
 		if (hooks->GameMenu)
+		{
 			hooks->GameMenu->RegisterOnUIStateChanged(PLUGIN_UI_IN_GAMEPLAY, OnUIStateChanged, nullptr);
+			hooks->GameMenu->RegisterOnUIStateChanged(PLUGIN_UI_MAP, OnMapStateChanged, nullptr);
+		}
 
 		// Clear stale state before world teardown.
 		hooks->World->RegisterOnBeforeWorldEndPlay(OnBeforeWorldEndPlay);
@@ -1124,12 +1236,14 @@ namespace Compass
 		}
 
 		if (g_hooks && g_hooks->GameMenu)
+		{
 			g_hooks->GameMenu->UnregisterOnUIStateChanged(OnUIStateChanged, nullptr);
+			g_hooks->GameMenu->UnregisterOnUIStateChanged(OnMapStateChanged, nullptr);
+		}
 
 		// Give the texture references back, on the game thread only. Shutdown also
 		// runs at process exit, off it, where the references are left alone.
-		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread(),
-		               CompassFields::ReleaseTextureRefs.On());
+		ReleaseTextures(hooks && hooks->Engine && hooks->Engine->IsGameThread && hooks->Engine->IsGameThread());
 
 		g_hooks        = nullptr;
 		g_self         = nullptr;

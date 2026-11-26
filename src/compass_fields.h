@@ -75,8 +75,8 @@ namespace CompassFields
 	// The parts of the compass that can be off while the rest runs. Each lists
 	// the game members it reads; a member that does not resolve on a game build
 	// turns off that part and its config section, and the compass still draws.
-	// The map helper and bMapMenuOpen feed three of them. The Draw hook is not
-	// listed: without it there is no compass, so it stays a core miss.
+	// The map helper and bMapMenuOpen feed three of them. WholeCompass, last,
+	// covers all of it.
 	inline PluginMap::Feature PlayerMarkers{ "players", "Other players on the compass",
 		{ "UCrMapManuSubsystem::GatherPlayersData", "ACrPlayerControllerBase::bMapMenuOpen",
 		  "ACrGameStateBase::MapMenuDataReplicationHelper",
@@ -106,6 +106,9 @@ namespace CompassFields
 	// UObject::AddRef holds the icon textures with the engine's own reference. It is
 	// a map key with no pattern of our own, so it is declared here: on a build the
 	// map has no row for, the icons are off and the compass draws text markers.
+	// This and the next feature only catch that miss. Nothing reads their On():
+	// the null address is what turns each off, and the references are what keep
+	// the icons safe to draw.
 	inline PluginMap::Feature IconTextures{ "icon-textures", "Compass icon textures",
 		{ "UObject::AddRef" }, {} };
 	// UObject::ReleaseRef gives back the references the icon textures hold. It is a
@@ -119,13 +122,21 @@ namespace CompassFields
 		  "FCrPlayerPersonalMarkerData::PlayerName", "FCrPlayerPersonalMarkerData::PlayerColor",
 		  "FCrPlayerPersonalMarkerData" },
 		{ "CustomPins.*" } };
+	// The whole compass. While it is off the compass draws nothing, takes back
+	// what it changed in the game and releases its textures. Its key is the Draw
+	// hook, without which there is no compass.
+	inline PluginMap::Feature WholeCompass{ "compass", "The compass",
+		{ "UGameViewportClient::Draw" },
+		{ "General.*", "Compass.*", "Players.*", "BaseCores.*", "Markers.*", "Foundables.*",
+		  "Enemies.*", "CustomPins.*" } };
 
 	// Call before Resolve and Compass::ResolvePatterns, so a miss lands on a
 	// feature and not on the whole plugin.
 	inline void DeclareFeatures(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
 		PluginMap::DeclareFeatures(scanner, self,
-			PlayerMarkers, BaseCoreMarkers, FoundableMarkers, EnemyMarkers, CustomPinMarkers, IconTextures, ReleaseTextureRefs);
+			PlayerMarkers, BaseCoreMarkers, FoundableMarkers, EnemyMarkers, CustomPinMarkers, IconTextures, ReleaseTextureRefs,
+			WholeCompass);
 	}
 
 	// Asks the loader for every row above. False when any did not resolve; the
