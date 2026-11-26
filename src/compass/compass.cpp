@@ -443,7 +443,8 @@ namespace Compass
 		return g_hooks && g_hooks->NetMode && g_hooks->NetMode->GetNetMode() == EPluginNetMode::Client
 			&& CompassFields::ServerMapData.On()
 			&& (ActiveFeatures() & kMapData)
-			&& s_cfg.enabled;
+			&& s_cfg.enabled
+			&& (s_cfg.players.enabled || s_cfg.cores.enabled || s_cfg.foundables.enabled);
 	}
 
 	// Keeps the request up while the compass wants the data, and once it does not,
@@ -453,6 +454,10 @@ namespace Compass
 		const bool mapJustClosed = s_mapWasOpen && !s_mapOpen;
 		s_mapWasOpen = s_mapOpen;
 		s_serverMapResendAccum += deltaSeconds;
+
+		// While the net mode cannot be read, nothing is sent either way.
+		if (g_hooks && g_hooks->NetMode && g_hooks->NetMode->GetNetMode() == EPluginNetMode::Unknown)
+			return;
 
 		const bool wanted = WantsServerMapData();
 		if (s_mapOpen || (!wanted && !s_serverMapOpenSent))
