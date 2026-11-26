@@ -71,6 +71,7 @@ namespace Compass
 
 	struct DrawConfig
 	{
+		bool enabled; // cached for the tick; the draw hook reads IsEnabled itself
 		bool textOnly;
 		float scale;
 		float posY;
@@ -90,6 +91,7 @@ namespace Compass
 
 	static void RefreshConfig()
 	{
+		s_cfg.enabled = CompassConfig::Config::IsEnabled();
 		s_cfg.textOnly = CompassConfig::Config::IsTextOnly() || !g_addRef;
 		s_cfg.scale = CompassConfig::Config::GetScale();
 		s_cfg.posY = CompassConfig::Config::GetPosY();
@@ -210,6 +212,14 @@ namespace Compass
 	static bool s_isChimeraMain = false; // set by OnAnyWorldBeginPlay, cleared by OnBeforeWorldEndPlay
 	static bool s_setMapMenuOpen = false; // bMapMenuOpen was clear and the compass set it, this world
 	static bool s_mapOpen = false;        // the game's map is on screen
+
+	// A server was told this player has the map open because the compass said so.
+	static bool s_serverMapOpenSent = false;
+	static bool s_mapWasOpen = false;
+	// The request is repeated, because the game sends its own "closed" when the
+	// player closes the map.
+	constexpr float kServerMapResendSeconds = 2.0f;
+	static float s_serverMapResendAccum = kServerMapResendSeconds;
 
 	static void RefreshEntities(SDK::UWorld* world)
 	{
@@ -380,6 +390,33 @@ namespace Compass
 		s_setMapMenuOpen = false;
 	}
 
+	static bool SendServerMapOpen(SDK::UWorld* world, bool open)
+	{
+		SDK::APlayerController* pc = SDK::UGameplayStatics::GetPlayerController(world, 0);
+		if (!pc || !pc->IsA(SDK::ACrPlayerControllerBase::StaticClass()) || !g_hooks || !g_hooks->ObjectWalker)
+			return false;
+
+		PluginMap::ParamsBlock block = PluginMap::ParamsBlockOf(CompassFields::MapOpenRpcSize,
+			{ &CompassFields::MapOpenRpcIsOpen });
+		uint8_t* isOpen = block.Param("IsOpen");
+		if (!isOpen || CompassFields::MapOpenRpcIsOpen.resolvedSize != 1)
+			return false;
+		*isOpen = open ? 1 : 0;
+
+		void* function = g_hooks->ObjectWalker->ResolveUFunction("CrPlayerControllerBase", "ServerSetMapMenuOpened");
+		return function && g_hooks->ObjectWalker->InvokeResolvedUFunction(pc, function, block.Data());
+	}
+
+	// Takes the request back. With the map on screen it is the game's.
+	static void ReleaseServerMapData(SDK::UWorld* world)
+	{
+		if (!s_serverMapOpenSent || s_mapOpen || !world || !SendServerMapOpen(world, false))
+			return;
+		s_serverMapOpenSent = false;
+		s_serverMapResendAccum = kServerMapResendSeconds;
+		LOG_INFO("[Compass] Server map data no longer requested");
+	}
+
 	// The live gameplay world, or null outside gameplay, where there is nothing
 	// in the world to put back. False when it cannot be read right now.
 	static bool GameplayWorld(SDK::UWorld*& world)
@@ -398,6 +435,46 @@ namespace Compass
 	{
 		RestoreMapMenuOpen(world);
 		Layout::RemoveStandInHelper(world);
+	}
+
+	// A joined client only: single player and a host gather through bMapMenuOpen.
+	static bool WantsServerMapData()
+	{
+		return g_hooks && g_hooks->NetMode && g_hooks->NetMode->GetNetMode() == EPluginNetMode::Client
+			&& CompassFields::ServerMapData.On()
+			&& (ActiveFeatures() & kMapData)
+			&& s_cfg.enabled;
+	}
+
+	// Keeps the request up while the compass wants the data, and once it does not,
+	// takes it back, trying again until that is sent. Game thread, every tick.
+	static void SyncServerMapData(float deltaSeconds)
+	{
+		const bool mapJustClosed = s_mapWasOpen && !s_mapOpen;
+		s_mapWasOpen = s_mapOpen;
+		s_serverMapResendAccum += deltaSeconds;
+
+		const bool wanted = WantsServerMapData();
+		if (s_mapOpen || (!wanted && !s_serverMapOpenSent))
+			return;
+
+		SDK::UWorld* world = nullptr;
+		if (!GameplayWorld(world) || !world)
+			return;
+
+		if (!wanted)
+		{
+			ReleaseServerMapData(world);
+			return;
+		}
+		if (!mapJustClosed && s_serverMapResendAccum < kServerMapResendSeconds)
+			return;
+		s_serverMapResendAccum = 0.0f;
+		if (SendServerMapOpen(world, true) && !s_serverMapOpenSent)
+		{
+			s_serverMapOpenSent = true;
+			LOG_INFO("[Compass] Server map data requested");
+		}
 	}
 
 	static void SyncFeatures()
@@ -442,6 +519,7 @@ namespace Compass
 	static void OnTick(float deltaSeconds)
 	{
 		SyncFeatures();
+		SyncServerMapData(deltaSeconds);
 		if (!CompassFields::WholeCompass.On()) return;
 		if (!s_isChimeraMain) return;
 
@@ -1019,7 +1097,7 @@ namespace Compass
 		s_mapOpen = (newState & PLUGIN_UI_MAP) != 0;
 	}
 
-	static void OnBeforeWorldEndPlay(SDK::UWorld* /*world*/, const char* worldName)
+	static void OnBeforeWorldEndPlay(SDK::UWorld* world, const char* worldName)
 	{
 		LOG_INFO("[Compass] OnBeforeWorldEndPlay: '%s' — clearing all caches and stale pointers", worldName);
 
@@ -1027,6 +1105,13 @@ namespace Compass
 		// is used on the next one, and the scans fire immediately there.
 		ClearEntityCaches();
 		s_setMapMenuOpen = false;
+
+		// Taken back while the controller may still reach the server. Either way
+		// the next world starts with nothing asked for.
+		if (s_isChimeraMain)
+			ReleaseServerMapData(world);
+		s_serverMapOpenSent = false;
+		s_serverMapResendAccum = kServerMapResendSeconds;
 
 		// The texture references persist across worlds; nothing to clear for them.
 		// The next world writes its own "N/9 loaded" line.
@@ -1263,7 +1348,10 @@ namespace Compass
 			&& hooks->Engine->IsGameThread();
 		SDK::UWorld* world = nullptr;
 		if (onGameThread && GameplayWorld(world))
+		{
+			ReleaseServerMapData(world);
 			ReleaseMapData(world);
+		}
 		ReleaseTextures(onGameThread);
 
 		g_hooks        = nullptr;

@@ -3,6 +3,7 @@
 #include "plugin_interface.h"
 #include "Engine_classes.hpp"
 #include "Chimera_classes.hpp"
+#include "Chimera_parameters.hpp"
 #include "Chimera_structs.hpp"
 #include "MassAIPrototypeEnemyRuntime_classes.hpp"
 #include "plugin_map.h"
@@ -55,6 +56,11 @@ namespace CompassFields
 	inline auto FoundableItemSize = SR_SIZE_CHECK(FFoundableMarkerDataFastArrayItem);
 	inline auto PlayerItemSize    = SR_SIZE_CHECK(FPlayerMarkerDataFastArrayItem);
 	inline auto PinItemSize       = SR_SIZE_CHECK(FCrPlayerPersonalMarkerData);
+
+	// The game's own call that tells a server this player has the map open, which
+	// is when the server gathers the marker data.
+	inline auto MapOpenRpcSize   = SR_PARAMS_SIZE(CrPlayerControllerBase, ServerSetMapMenuOpened);
+	inline auto MapOpenRpcIsOpen = SR_PARAM(CrPlayerControllerBase, ServerSetMapMenuOpened, IsOpen);
 
 	// ACrPlayerControllerBase::bMapMenuOpen is a native bool with no UPROPERTY.
 	// UCrMapManuSubsystem::UpdateMapMenuData tests it on each player controller
@@ -123,6 +129,11 @@ namespace CompassFields
 		  "FCrPlayerPersonalMarkerData::PlayerName", "FCrPlayerPersonalMarkerData::PlayerColor",
 		  "FCrPlayerPersonalMarkerData" },
 		{ "CustomPins.*" } };
+	// On a dedicated server the marker data arrives only while the server believes
+	// this player has the map open, so the compass asks it to. Off, the markers
+	// show whatever the server sends anyway.
+	inline PluginMap::Feature ServerMapData{ "server-map-data", "Map markers from a dedicated server",
+		PluginMap::KeysOf(MapOpenRpcSize, MapOpenRpcIsOpen), {} };
 	// The whole compass. While it is off the compass draws nothing, takes back
 	// what it changed in the game and releases its textures. Its key is the Draw
 	// hook, without which there is no compass.
@@ -137,7 +148,7 @@ namespace CompassFields
 	{
 		PluginMap::DeclareFeatures(scanner, self,
 			PlayerMarkers, BaseCoreMarkers, FoundableMarkers, EnemyMarkers, CustomPinMarkers, IconTextures, ReleaseTextureRefs,
-			WholeCompass);
+			ServerMapData, WholeCompass);
 	}
 
 	// Asks the loader for every row above. False when any did not resolve; the
@@ -146,6 +157,8 @@ namespace CompassFields
 	{
 		const bool nativeOk = PluginMap::ResolveField(scanner, self, MapMenuOpen,
 			kMapMenuOpenRows, static_cast<uint32_t>(std::size(kMapMenuOpenRows)));
+		// A miss here only turns ServerMapData off.
+		PluginMap::ResolveFields(scanner, self, MapOpenRpcSize, MapOpenRpcIsOpen);
 		return PluginMap::ResolveFields(scanner, self,
 			BaseCoreUpgradeLevel, BaseCoreIsAttacked, BaseCoreIsInfected, EnemyDissolve,
 			MapMenuHelper, PlayerPersonalMarkers,
