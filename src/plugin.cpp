@@ -12,6 +12,10 @@ IPluginSelf* GetSelf() { return g_self; }
 #define MODLOADER_BUILD_TAG "dev"
 #endif
 
+// The loader refuses a migrated plugin that names no game build, on every build.
+static_assert(PLUGIN_GAME_BUILT_CL != 0,
+	"No game build: use Game-SDK headers with build_cl.txt, or pass /p:PluginGameBuiltCL=<CL>");
+
 static PluginInfo s_pluginInfo = {
 	"Compass",
 	MODLOADER_BUILD_TAG,

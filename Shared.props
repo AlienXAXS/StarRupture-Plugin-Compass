@@ -62,14 +62,11 @@
 
   <!-- ============================================================
        PLUGIN_GAME_BUILT_CL
-       The game build (CL) the plugin's candidate rows are for. Pinned
-       here; a build passes /p:PluginGameBuiltCL=<CL> to override it.
-       PluginGameBuild.props (Plugin SDK) turns it into the define that
-       plugin_interface.h stores in PluginInfo::gameBuiltCL.
+       The game build (CL) stored in PluginInfo::gameBuiltCL.
+       PluginGameBuild.props (Plugin SDK) reads it from build_cl.txt in
+       the Game-SDK headers. For headers without that file, pass
+       /p:PluginGameBuiltCL=<CL>.
        ============================================================ -->
-  <PropertyGroup>
-    <PluginGameBuiltCL Condition="'$(PluginGameBuiltCL)' == ''">127004</PluginGameBuiltCL>
-  </PropertyGroup>
   <Import Project="$(PluginSDKInclude)\..\PluginGameBuild.props"
           Condition="Exists('$(PluginSDKInclude)\..\PluginGameBuild.props')" />
 
