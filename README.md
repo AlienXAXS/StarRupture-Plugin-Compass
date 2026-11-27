@@ -43,7 +43,7 @@ Config is stored in `Plugins\config\Compass.ini` and is generated on first launc
 
 3. After the first launch, edit `Plugins\config\Compass.ini` and set `Enabled=1`.
 
-> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.23.0 or later** to be installed first.
+> **Requires [StarRupture-ModLoader](https://github.com/AlienXAXS/StarRupture-ModLoader) v1.23.0 or later** to be installed first. On game build 130045, use v1.27.0 or later: with an older loader whose version object map does not cover your game build, the compass, or some of its markers, stays off.
 
 ---
 

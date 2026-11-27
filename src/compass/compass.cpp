@@ -1198,20 +1198,28 @@ namespace Compass
 		// called, and either way the address has to be a function's primary
 		// entry. The loader checks that against the exception directory.
 		//
-		// Draw is a key in the loader's map, so a game update that moves it is a
-		// map row and not a new plugin build. The pattern stays as the fallback
-		// for a loader whose map has no row for the running build.
+		// Both are keys in the loader's version map. The patterns are compiled
+		// in only for the builds that read this plugin's keys, so a shipped build
+		// never scans with them.
 		g_viewportDrawAddr = PluginMap::Function(scanner, self,
-			"UGameViewportClient::Draw", AobPatterns::UGameViewportClient_Draw,
+			"UGameViewportClient::Draw", PLUGIN_MAP_PATTERN(AobPatterns::UGameViewportClient_Draw),
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
 
 		// GatherPlayersData is a map key too. Its prologue is shared with at least
-		// one unrelated function on some builds, so the pattern fallback demands
-		// exactly one match, as every resolve does.
+		// one unrelated function on some builds: see aob_patterns.h.
 		g_gatherPlayersDataAddr = PluginMap::Function(scanner, self,
 			"UCrMapManuSubsystem::GatherPlayersData",
-			AobPatterns::UCrMapManuSubsystem_GatherPlayersData,
+			PLUGIN_MAP_PATTERN(AobPatterns::UCrMapManuSubsystem_GatherPlayersData),
 			PLUGIN_SCAN_FUNCTION_START, PLUGIN_SCAN_FLAG_OPTIONAL);
+
+		// ModLoader v1.27.0 is the first release with these built in for game
+		// builds 127004 to 130045. A later build needs a version map that has it.
+		if (!g_viewportDrawAddr)
+			LOG_WARN("[Compass] The compass is off: this game build needs ModLoader v1.27.0 or newer, "
+				"or a version object map that covers it");
+		else if (!g_gatherPlayersDataAddr || CompassFields::MapMenuOpen.offset < 0)
+			LOG_WARN("[Compass] Some map markers are off: this game build needs ModLoader v1.27.0 or newer, "
+				"or a version object map that covers it");
 
 		// The engine's strong reference pair that keeps the icon textures alive.
 		// Both are global keys in the loader's map and have no pattern of our own.
@@ -1253,8 +1261,8 @@ namespace Compass
 
 		SetStrongRefFunctions(g_addRefAddr, g_releaseRefAddr);
 
-		// GatherPlayersData comes from our own scan back in OnPluginLoadHooks, not
-		// from the modloader's cache -- see aob_patterns.h for why.
+		// GatherPlayersData was resolved by its own key back in OnPluginLoadHooks,
+		// not taken from the modloader's cache -- see aob_patterns.h for why.
 		if (g_gatherPlayersDataAddr)
 		{
 			g_gatherPlayersDataFn = reinterpret_cast<GatherPlayersData_t>(g_gatherPlayersDataAddr);

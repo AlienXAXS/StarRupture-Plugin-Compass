@@ -64,35 +64,6 @@ namespace AobPatterns
 		"40 55 53 56 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 48 8B D9 E8 ?? ?? ?? ?? 48 8B B0";
 
 	// -----------------------------------------------------------------------
-	// Struct offsets
-	//
-	// Raw byte offsets into game objects, for fields the SDK dump does not
-	// expose (native members with no UPROPERTY show up as Pad_xxxx). These
-	// shift whenever a class gains or loses a member, and a stale one writes
-	// into whatever now occupies that slot -- silent memory corruption, not a
-	// crash. Re-check every one of them after a game update.
-	// -----------------------------------------------------------------------
-
-	namespace Offsets
-	{
-		// ACrPlayerControllerBase::bMapMenuOpen (native bool, no UPROPERTY).
-		//
-		// UCrMapManuSubsystem::UpdateMapMenuData only calls GatherBuildingsData /
-		// GatherPlayersData / GatherBaseAttackData when at least one player
-		// controller has this set, so the compass sets it to keep the subsystem's
-		// marker containers refreshing while the map is closed.
-		//
-		// To re-derive: decompile UCrMapManuSubsystem::UpdateMapMenuData and read
-		// the flag it tests on each PC before incrementing its counter. IDA shows
-		// it as PC[98].NamePrivate.ComparisonIndex.Value -- 98 * sizeof(UObject)
-		// (40) + 0x18 = 0xF68.
-		//
-		// CL-125218 (Update 2): 0xF68. Was 0xEE8 pre-Update-2; that slot is now
-		// inside OnContextInteractionStart (a TMulticastDelegate at 0xED0).
-		inline constexpr unsigned int ACrPlayerControllerBase_bMapMenuOpen = 0xF68;
-	}
-
-	// -----------------------------------------------------------------------
 	// Addresses supplied by the modloader
 	//
 	// Not scanned here -- the loader resolves these at startup and hands them
@@ -104,7 +75,7 @@ namespace AobPatterns
 	// GatherPlayersData used to come from hooks->HUD->GetGatherPlayersDataAddress()
 	// and no longer does: the loader's pattern for it went ambiguous in Update 2
 	// and resolved to UBiomesRuntimeSpawningSubsystem::Initialize, which Compass
-	// then called once per player scan. Scanning it here keeps the pattern next
-	// to the code that depends on it and puts a uniqueness check on it.
+	// then called once per player scan. Compass asks for it by its own key
+	// instead, and the pattern above stays next to the code that depends on it.
 	// -----------------------------------------------------------------------
 }

@@ -7,9 +7,6 @@
 #include "Chimera_structs.hpp"
 #include "MassAIPrototypeEnemyRuntime_classes.hpp"
 #include "plugin_map.h"
-#include "aob_patterns.h"
-
-#include <iterator>
 
 // Every member of a game class the compass reads, taken from the loader's map
 // for the running game build (see plugin_map.h). Resolved once in
@@ -65,18 +62,10 @@ namespace CompassFields
 	// ACrPlayerControllerBase::bMapMenuOpen is a native bool with no UPROPERTY.
 	// UCrMapManuSubsystem::UpdateMapMenuData tests it on each player controller
 	// and only then gathers the marker data. A stale offset would write into
-	// whatever now sits there, so on a build the loader has no row for, the
-	// compass is refused instead.
-	// CL-125218 (Update 2) and CL-127004: 0xF68. The row below is this plugin's
-	// own for the build it was compiled against; every other build comes from
-	// the loader's map.
+	// whatever now sits there, so it comes only from a row in the loader's version
+	// map: there is no built offset and no row of the plugin's own.
 	inline auto MapMenuOpen = PluginField<uint8_t>{ { "ACrPlayerControllerBase::bMapMenuOpen",
-		"ACrPlayerControllerBase", "bMapMenuOpen", PLUGIN_FIELD_NATIVE, sizeof(uint8_t),
-		static_cast<int32_t>(AobPatterns::Offsets::ACrPlayerControllerBase_bMapMenuOpen) } };
-
-	inline const PluginFieldCandidate kMapMenuOpenRows[] = {
-		{ 127004, static_cast<int32_t>(AobPatterns::Offsets::ACrPlayerControllerBase_bMapMenuOpen), 1, 0, nullptr },
-	};
+		"ACrPlayerControllerBase", "bMapMenuOpen", PLUGIN_FIELD_NATIVE, sizeof(uint8_t), -1 } };
 
 	// The parts of the compass that can be off while the rest runs. Each lists
 	// the game members it reads; a member that does not resolve on a game build
@@ -155,8 +144,9 @@ namespace CompassFields
 	// loader has then recorded the failure and refuses the plugin.
 	inline bool Resolve(IPluginSelf* self, IPluginHookScanner* scanner)
 	{
-		const bool nativeOk = PluginMap::ResolveField(scanner, self, MapMenuOpen,
-			kMapMenuOpenRows, static_cast<uint32_t>(std::size(kMapMenuOpenRows)));
+		// Built changelist 0: with no row for the running build, the loader then
+		// has no compiled offset to fall back on.
+		const bool nativeOk = PluginMap::ResolveField(scanner, self, MapMenuOpen, nullptr, 0, 0);
 		// A miss here only turns ServerMapData off.
 		PluginMap::ResolveFields(scanner, self, MapOpenRpcSize, MapOpenRpcIsOpen);
 		return PluginMap::ResolveFields(scanner, self,
